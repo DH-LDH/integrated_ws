@@ -18,22 +18,17 @@ source ~/integrated_ws/install/setup.bash
 환경 설정이 완료된 터미널에서 다음 노드들을 목적에 맞게 실행합니다. (각 노드당 하나의 터미널 창을 사용해 주세요.)
 
 📷 비전 시스템
-
-Bash
 ros2 run vision_pkg vision_node
-🦾 하드웨어 및 그리퍼 제어
 
-Bash
+🦾 하드웨어 및 그리퍼 제어
 ros2 run hardware_pkg robot2_gpio_gripper_node
 ros2 run hardware_pkg gripper_node
-⚙️ 메인 매니퓰레이터 제어 및 명령
 
-Bash
+⚙️ 메인 매니퓰레이터 제어 및 명령
 ros2 run control_pkg robot_node
 ros2 run control_pkg command_node
-🖥️ 수동 조작 및 시스템 테스트
 
-Bash
+🖥️ 수동 조작 및 시스템 테스트
 ros2 run sml_system_pkg manual_order_node_test
 
 ---
