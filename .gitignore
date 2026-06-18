@@ -1,0 +1,12 @@
+# ROS2 workspace directories
+build/
+install/
+log/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# OS generated files
+.DS_Store
+*~
