@@ -10,7 +10,7 @@ from std_srvs.srv import SetBool, Trigger
 Z_OFF_DEFAULT         = -95.0   # 비전 Z → 엔드이펙터 Z 변환 오프셋 (mm)
 Z_MARGIN_DEFAULT      =  20.0   # 블록 접근 전 안전 여유 거리 (mm)
 BLOCK_H_DEFAULT       =  16.0   # 레고 블록 한 층 높이 실측값 (mm)
-LAYER_IDX_OFFSET      =   1.   # 층 인덱스 보정 오프셋 — assembly 실측값 기준 (1층→0.7, 2층→1.7, 3층→2.7)
+LAYER_IDX_OFFSET      =   1.5   # 층 인덱스 보정 오프셋 — assembly 실측값 기준 (1층→0.6, 2층→1.6, 3층→2.6)
 WAIT_TIME_DEFAULT     =   0.7   # 동작 간 일반 대기 시간 (s)
 GRIP_WAIT_DEFAULT     =   1.3   # 그리퍼 동작 후 안정화 대기 (s)
 INITIAL_LIFT_DEFAULT  = -20.0   # 그립 직후 초기 상승 거리 (mm, 음수=위로)
@@ -179,7 +179,7 @@ class BatteryDualDisassembly(Node):
             return False
 
         target_yaw  = self._pick_wrist_yaw(p.yaw + yaw_offset)
-        layer_index = max(0.0, (expected_layer or 2) - self.LAYER_IDX_OFF)  # 1→0.7, 2→1.7, 3→2.7
+        layer_index = max(0.0, (expected_layer or 2) - self.LAYER_IDX_OFF)  # 1→0.6, 2→0.6, 3→1.6
         z_move      = (p.z * 1000.0 + self.Z_OFF) - (self.BLOCK_H * layer_index) + z_extra_mm
         z_approach  = z_move - self.Z_MARGIN
 
@@ -381,7 +381,7 @@ class BatteryDualDisassembly(Node):
     def _run_layers(self, name: str, layers: list) -> bool:
         """
         3층 이상 범용 분해 러너. 위층부터 순서대로 표준 분해.
-        layers = [(층번호, target, label [, yaw_offset [, r1_drop_slot]]), ...]
+        layers = [(층번호, target, label [, yaw_offset [, r1_drop_slot [, z_extra_mm]]]), ...]
         r1_drop_slot 미지정 시 순서 기반 자동 할당 (첫번째=DROP, 두번째=DROP2, ...).
         """
         self.get_logger().info(f"{name} {len(layers)}층 분해 시작")
@@ -467,9 +467,10 @@ class BatteryDualDisassembly(Node):
         ])
 
     def run_burger_once(self):
+        # 구조: 3층=4x2노랑 / 2층=4x2빨강+2x2빨강(나란히) / 1층=4x2노랑
         return self._run_layers("버거", [
-            (4, "4x2_yellow", "4x2 노랑"),
-            (3, "2x2_red",    "2x2 빨강"),
+            (3, "4x2_yellow", "4x2 노랑"),
+            (2, "2x2_red",    "2x2 빨강"),
             (2, "4x2_red",    "4x2 빨강"),
             (1, "4x2_yellow", "4x2 노랑"),
         ])
