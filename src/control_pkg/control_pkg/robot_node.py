@@ -235,17 +235,17 @@ import numpy as np
 ROBOT_CONFIGS = {
     "robot1": {
         "ip": "10.0.2.7",
-        "cam_x_off": -51.383,
-        "cam_y_off": 32.485,
+        "cam_x_off": -51.5, # 바깥으로 가고싶으면 음수, 몸쪽으로 오고 싶으면 양수
+        "cam_y_off": 29.485, #32.485
         "home_joint": [-90.0, 6.67, 35.34, 0.0, 138.0, 0.0],
         "end_joint": [-90.0, -65.0, 110.0, 0.0, 140.0, 0.0],
         "center_joint": [-108.2, -10.14, 104.67, 0.0, 85.48, -18.2],
-        "separation_joint": [-88.26, 3.5, 48.84, 0.0, 126.44, -90.0],
-        "drop_joint": [-90.0, 11.04, 83.29, 0.0, 85.67, 0.0],
-        "drop_joint2": [-102.53, 13.33, 80.6, 0.0, 86.07,-12.53],
-        "drop_joint3": [-113.13, 20.29, 71.96, 0.0, 87.75,-20.84],
-        "drop_joint4": [-79.61, 11.64, 82.56, 0.0, 85.77,10.39],
-        "drop_joint5": [-68.76, 15.86, 77.51, 0.0, 86.61,21.24],
+        "separation_joint": [-91.02, 21.07, 26.68, 0.11, 131.03, -91.23],
+        "drop_joint": [-90.0, 19.26, 74.23, 0.02, 86.51, 0.0],
+        "drop_joint2": [-100.03, 20.95, 72.05, 0.02, 87.00, -10.03],
+        "drop_joint3": [-108.77, 25.01, 66.67, 0.02, 88.32, -18.76],
+        "drop_joint4": [-79.86, 20.43, 72.73, 0.02, 86.85, 10.14],
+        "drop_joint5": [-70.49, 24.35, 67.56, 0.02, 88.09, 19.52]
     },
     "robot2": {
         "ip": "10.0.2.8",
@@ -255,11 +255,12 @@ ROBOT_CONFIGS = {
         "end_joint": [-90.0, -94.0, 147.7, 0.0, -50.0, 0.0],
         # 👇 추가된 중간 경유지 (Waypoint)
         "separation_waypoint": [-90.0, 0.0, 120.0, 0.0, -30.0, 0.0], 
-        
-        "separation_joint": [-90.0, -9.35, 111.55, 0.03, -12.96, -0.02],
-        "drop_joint": [-90.0, 7.89, 131.43, 0.0, -49.32, 0.0],
-        "drop_joint2": [-90.0, 9.27, 131.51, 0.0, -48.47, 0.0],  #2,3층 시퀀스만 해당
-    },
+
+        "separation_joint": [-90.0, -9.73, 112.34, 0.0, -14.06, 0.0],
+        "drop_joint": [-95.09, 4.38, 135.12, -2.38, -41.78, 0.0],
+        "drop_joint2": [-95.0, 8.48, 132.29, -2.78, -47.6, 2.73], # 2,3층 시퀀스만 해당
+        "drop_joint3": [-95.0, 4.25, 131.84, -3.01, -42.93, 3.06] # 4층 시퀀스  
+    }
 }
 
 
@@ -397,6 +398,14 @@ class DualRobotNode(Node):
                 pose = np.array([dy, dx, req.z, 0, 0, req.yaw], dtype=float)
                 robot.move_l_rel(rc, pose, self.L_VEL, self.L_ACC, rb.ReferenceFrame.Tool)
                 self.wait_move(robot_name, f"APPROACH_DELTA(yaw={req.yaw:.1f})")
+
+            elif req.target_size == "HOME_X_SEARCH":
+                # HOME 기준 좌우 탐색 전용.
+                # Tool 프레임으로 HOME에서 바로 밀면 관절이 더 펴질 수 있어
+                # Base 프레임 기준 직선 이동으로 x축 탐색만 수행한다.
+                pose = np.array([req.x * 1000.0, 0, 0, 0, 0, 0], dtype=float)
+                robot.move_l_rel(rc, pose, self.L_VEL, self.L_ACC, rb.ReferenceFrame.Base)
+                self.wait_move(robot_name, f"HOME_X_SEARCH(x={req.x * 1000.0:.1f}mm)")
 
             elif req.target_size == "SEPARATION":
                 if handle.get("separation_waypoint") is not None:
