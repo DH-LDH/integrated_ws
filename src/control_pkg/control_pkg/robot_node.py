@@ -253,6 +253,7 @@ ROBOT_CONFIGS = {
         "cam_y_off": 51.0, 
         "home_joint": [-90.0, -94.0, 147.7, 0.0, 35.6, 0.0],
         "end_joint": [-90.0, -94.0, 147.7, 0.0, -50.0, 0.0],
+        "assembly_joint": [-102.79, -28.01, 87.39, -24.36, 157.16, -32.45],
         # 👇 추가된 중간 경유지 (Waypoint)
         "separation_waypoint": [-90.0, 0.0, 120.0, 0.0, -30.0, 0.0], 
 
@@ -282,6 +283,7 @@ class DualRobotNode(Node):
                 "cam_y_off": cfg["cam_y_off"],
                 "home_joint": np.array(cfg["home_joint"], dtype=float),
                 "end_joint": np.array(cfg.get("end_joint", cfg["home_joint"]), dtype=float),
+                "assembly_joint": np.array(cfg.get("assembly_joint", cfg["home_joint"]), dtype=float),
                 
                 "separation_waypoint": np.array(cfg["separation_waypoint"], dtype=float) if "separation_waypoint" in cfg else None,
                 
@@ -442,6 +444,10 @@ class DualRobotNode(Node):
             elif req.target_size == "END":
                 robot.move_j(rc, handle["end_joint"], 255, 255)
                 self.wait_move(robot_name, "END")
+
+            elif req.target_size == "ASSEMBLY_JOINT":
+                robot.move_j(rc, handle["assembly_joint"], 255, 255)
+                self.wait_move(robot_name, "ASSEMBLY_JOINT")
 
             else:
                 self.get_logger().error(f"{robot_name} unknown target_size: {req.target_size}")

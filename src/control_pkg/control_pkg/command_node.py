@@ -163,8 +163,15 @@ class WbCommandNode(Node):
         goal_handle.publish_feedback(fb)
 
         a = self.assembler
-        # 시작 상태 초기화 (master_node.run() 시작부와 동일): HOME + 그리퍼 열기
-        a.call(a.cli_h, Trigger.Request())
+        # 시작 상태 초기화 (master_node.run() 시작부와 동일): robot1 HOME + robot2 assembly_joint + 그리퍼 열기
+        home_res = a.call(a.cli_h, Trigger.Request())
+        if home_res is None or not home_res.success:
+            return False, 'ASSEMBLY_HOME_FAILED'
+
+        assembly_res = a.move_robot2_assembly_joint()
+        if assembly_res is None or not assembly_res.success:
+            return False, 'ROBOT2_ASSEMBLY_JOINT_FAILED'
+
         a.call(a.cli_g, SetBool.Request(data=False))
         time.sleep(1.0)
 
@@ -218,6 +225,7 @@ class WbCommandNode(Node):
         print("  end / e         : robot1 END")
         print("  home2 / h2      : robot2 HOME")
         print("  end2 / e2       : robot2 END")
+        print("  assembly_joint / aj : robot2 ASSEMBLY_JOINT")
         print("  home_all / ha   : both HOME")
         print("  end_all / ea    : both END")
         print("  quit / q        : shutdown command node")
@@ -254,6 +262,9 @@ class WbCommandNode(Node):
                             self.disassembler.cli_r2,
                             "END",
                         )
+                    elif command in ("assembly_joint", "assembly", "aj"):
+                        self.get_logger().info("[KEYBOARD] robot2 ASSEMBLY_JOINT")
+                        self.assembler.move_robot2_assembly_joint()
                     elif command in ("home_all", "homeall", "ha"):
                         self.get_logger().info("[KEYBOARD] both HOME")
                         self.disassembler.move_both_home_pose()
@@ -265,7 +276,7 @@ class WbCommandNode(Node):
                         rclpy.shutdown()
                         return
                     else:
-                        print("Use: home/end/home2/end2/home_all/end_all/quit")
+                        print("Use: home/end/home2/end2/assembly_joint/home_all/end_all/quit")
             except Exception as e:
                 self.get_logger().error(f"[KEYBOARD] command failed: {e}")
 

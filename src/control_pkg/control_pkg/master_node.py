@@ -3,6 +3,7 @@ from rclpy.node import Node
 
 from srvs_pkg.srv import GetTargetPose
 from std_srvs.srv import SetBool, Trigger
+from std_msgs.msg import Int32
 
 import time
 import math
@@ -32,14 +33,14 @@ NEGATIVE_X_SCAN_EXTRA_ENABLE_DEFAULT = True
 # -0.050m = global x축 -50mm 방향
 NEGATIVE_X_EXTRA_GLOBAL_X_OFFSET_DEFAULT = 0.030
 
-# 조립 검증 시 저장된 재촬영 z값은 HOME 기준에서 안전하게 쓰이던 값이다.
-# 조립 직후 자세에서 바로 재사용하면 과도한 하강이 발생할 수 있으므로,
-# 기본값은 gripper를 닫은 상태로 HOME을 안전 경유한 뒤 재촬영 포즈로 이동한다.
+# 호환용 legacy 파라미터. 현재 조립 검증은 재촬영 이동이 아니라
+# decision_assembly block_count 감소로 판단한다.
 VERIFY_SCAN_VIA_HOME_DEFAULT = True
 
 STUD_PITCH = 0.016  # 스터드 간격 (m)
 SAME_CLASS_VERIFY_XY_TOLERANCE_M = 0.040
 POSE_EXCLUSION_XY_TOLERANCE_M = 0.045
+DECISION_BLOCK_COUNT_TOPIC_DEFAULT = "/decision_assembly/block_count"
 
 
 # 기존 CLASS_TO_TARGET_ID 매핑 유지
@@ -72,6 +73,7 @@ class MasterNode(Node):
         # ------------------------------------------------------------- #
         self.cli_v = self.create_client(GetTargetPose, "/get_target_pose")
         self.cli_r = self.create_client(GetTargetPose, "/robot1/robot_move_step")
+        self.cli_r2 = self.create_client(GetTargetPose, "/robot2/robot_move_step")
         self.cli_g = self.create_client(SetBool, "/control_gripper")
         self.cli_h = self.create_client(Trigger, "/robot1/robot_home")
 
@@ -148,18 +150,35 @@ class MasterNode(Node):
                 VERIFY_SCAN_VIA_HOME_DEFAULT,
             ).value
         )
+        self.DECISION_BLOCK_COUNT_TOPIC = str(
+            self.declare_parameter(
+                "decision_block_count_topic",
+                DECISION_BLOCK_COUNT_TOPIC_DEFAULT,
+            ).value
+        )
 
         self.last_perfect_pose = None
         self.home_x_search_skip_z_classes = set()
         self.precision_scan_requests = {}
         self.last_precision_scan_request = None
-        # 검증 재촬영에서 base 블록이 다시 보였을 때의 pose를 저장한다.
-        # 이 pose는 조립 실패 시 HOME으로 돌아가지 않고 바로 다음 조립 재시도에 사용한다.
+        # legacy retry pose 저장소. 현재 block_count 검증은 새 retry pose를 만들지 않는다.
         self.last_verify_visible_poses = {}
         self.held_class = None
         # 마지막 조립 검증 성공 후 HOME 이동을 이미 수행했는지 표시한다.
         # run()에서 불필요한 중복 HOME 이동을 줄이기 위한 플래그이다.
         self.post_action_home_done = False
+        self.latest_decision_block_count = None
+        self.latest_decision_block_count_time = None
+        self.current_insert_start_count = None
+        self.current_insert_verify_after_time = None
+        self.current_floor_count_at_home = None
+
+        self.decision_count_sub = self.create_subscription(
+            Int32,
+            self.DECISION_BLOCK_COUNT_TOPIC,
+            self.decision_block_count_cb,
+            10,
+        )
 
         self.get_logger().info(
             "[PARAM] robot1_z_off=%.1fmm, robot1_z_margin=%.1fmm, "
@@ -168,7 +187,8 @@ class MasterNode(Node):
             "negative_x_scan_extra_enable=%s, "
             "negative_x_extra_global_x_offset_m=%.4fm, "
             "verify_scan_via_home=%s, "
-            "home_x_search_enable=%s, home_x_search_step_m=%.4fm"
+            "home_x_search_enable=%s, home_x_search_step_m=%.4fm, "
+            "decision_block_count_topic=%s"
             % (
                 self.Z_OFF,
                 self.Z_MARGIN,
@@ -182,6 +202,7 @@ class MasterNode(Node):
                 self.VERIFY_SCAN_VIA_HOME,
                 self.HOME_X_SEARCH_ENABLE,
                 self.HOME_X_SEARCH_STEP_M,
+                self.DECISION_BLOCK_COUNT_TOPIC,
             )
         )
 
@@ -200,6 +221,97 @@ class MasterNode(Node):
         future = cli.call_async(req)
         rclpy.spin_until_future_complete(self, future)
         return future.result()
+
+    def decision_block_count_cb(self, msg):
+        self.latest_decision_block_count = int(msg.data)
+        self.latest_decision_block_count_time = time.monotonic()
+
+    def wait_decision_block_count(self, timeout_sec=2.0, after_time=None):
+        """
+        decision_assembly.py가 publish하는 바닥 블록 개수를 기다린다.
+        command_node에서는 executor가 subscriber를 처리하고, master_node 단독 실행에서는
+        여기서 짧게 spin_once를 돌려 최신 topic을 받는다.
+        """
+        deadline = time.monotonic() + timeout_sec
+
+        while rclpy.ok() and time.monotonic() < deadline:
+            count = self.latest_decision_block_count
+            stamp = self.latest_decision_block_count_time
+            if count is not None and (after_time is None or stamp >= after_time):
+                return count
+
+            if getattr(self, "executor", None) is None:
+                rclpy.spin_once(self, timeout_sec=0.05)
+            else:
+                time.sleep(0.05)
+
+        return None
+
+    def read_floor_count_at_home(self, label, timeout_sec=3.0):
+        count = self.wait_decision_block_count(timeout_sec=timeout_sec)
+        if count is None:
+            self.get_logger().error(
+                f"[COUNT] HOME에서 {label} 기준 block_count를 받지 못했습니다. "
+                f"topic={self.DECISION_BLOCK_COUNT_TOPIC}"
+            )
+            return None
+
+        self.get_logger().info(
+            f"[COUNT] HOME 기준 {label} 바닥 블록 개수={count}"
+        )
+        return count
+
+    def verify_floor_count_drop_after_home(self, label, before_count):
+        """
+        HOME으로 이동한 뒤 decision_assembly block_count가 정확히 1개 줄었는지 확인한다.
+        성공하면 다음 단계의 기준 count를 갱신한다.
+        """
+        if before_count is None:
+            self.get_logger().error(f"[VERIFY][COUNT] {label} 이전 HOME count가 없습니다.")
+            return False
+
+        self.get_logger().info(
+            f"[VERIFY][COUNT] {label}: HOME 이동 후 바닥 블록 개수 감소 확인 시작 "
+            f"(before={before_count})"
+        )
+
+        home_res = self.call(self.cli_h, Trigger.Request())
+        if home_res is None or not home_res.success:
+            self.get_logger().error(f"[VERIFY][COUNT] {label}: HOME 이동 실패")
+            return False
+
+        after_time = time.monotonic()
+        time.sleep(self.WAIT_TIME)
+        after_count = self.wait_decision_block_count(
+            timeout_sec=3.0,
+            after_time=after_time,
+        )
+        if after_count is None:
+            self.get_logger().error(
+                f"[VERIFY][COUNT] {label}: HOME 이동 후 새 block_count를 받지 못했습니다."
+            )
+            return False
+
+        expected_count = before_count - 1
+        self.get_logger().info(
+            f"[VERIFY][COUNT] {label}: before={before_count}, after={after_count}, "
+            f"expected={expected_count}"
+        )
+
+        if after_count != expected_count:
+            self.get_logger().warn(
+                f"[VERIFY][COUNT] {label}: 바닥 블록 개수가 정확히 1개 줄지 않았습니다. "
+                "실패로 판단합니다."
+            )
+            return False
+
+        self.current_floor_count_at_home = after_count
+        self.current_insert_start_count = after_count
+        self.current_insert_verify_after_time = None
+        self.get_logger().info(
+            f"[VERIFY][COUNT] {label}: 바닥 블록 개수가 1개 줄었습니다. 정상으로 판단합니다."
+        )
+        return True
 
     def to_vision_target_id(self, target):
         """
@@ -241,6 +353,17 @@ class MasterNode(Node):
         return self.call(
             self.cli_r,
             GetTargetPose.Request(target_size="END"),
+        )
+
+    def move_robot2_assembly_joint(self):
+        """
+        robot_node.py에 정의된 robot2 assembly_joint로 이동한다.
+        조립 시작 시 decision_assembly 카메라 시야/작업 공간을 비우기 위한 자세이다.
+        """
+        self.get_logger().info("[INIT] robot2 assembly_joint 이동")
+        return self.call(
+            self.cli_r2,
+            GetTargetPose.Request(target_size="ASSEMBLY_JOINT"),
         )
 
     def is_excluded_pose(self, pose, exclude_poses, tolerance_m=POSE_EXCLUSION_XY_TOLERANCE_M):
@@ -760,148 +883,27 @@ class MasterNode(Node):
 
     def verify_insert_from_saved_scan(self, target_color, home_after_success=False):
         """
-        조립 후 저장된 재촬영 위치에서 같은 target이 보이는지 확인한다.
-
-        중요 변경점:
-        - 조립 성공/실패 검증 전까지 gripper는 절대 열지 않는다.
-        - HOME 이동 전 별도 Z 상승은 수행하지 않는다.
-        - 조립 직후 자세에서 저장된 scan_request['z']를 바로 재사용하지 않는다.
-          scan_request['z']는 원래 HOME 기준 또는 정밀 재촬영 진입 기준으로 쓰이던 값이라,
-          조립 직후 위치에서 그대로 APPROACH 이동에 넣으면 바닥 방향으로 과도하게
-          내려갈 수 있다.
-        - 기본 동작은 gripper를 닫은 상태로 HOME을 안전 경유한 뒤, 저장된 재촬영
-          포즈로 다시 이동해서 검증한다.
+        조립 후 HOME으로 이동해 decision_assembly.py가 publish하는 바닥 블록 개수 변화로
+        조립 성공 여부를 판단한다.
 
         판정 기준:
-            - target_color가 보이면: 아직 base가 가려지지 않았으므로 조립 실패
-            - target_color가 안 보이면: base가 조립체에 의해 가려졌으므로 조립 성공
+            - 이전 HOME 기준 block_count보다 조립 후 HOME block_count가 정확히 1개 줄면 성공
+            - 같거나 다른 값이면 실패
         """
         target_color = str(target_color).strip()
-        scan_request = self.precision_scan_requests.get(target_color)
+        before_count = self.current_floor_count_at_home
+        if before_count is None:
+            before_count = self.current_insert_start_count
 
-        if scan_request is None:
-            scan_request = self.last_precision_scan_request
-
-        if scan_request is None:
-            self.get_logger().warn(
-                f"[VERIFY] {target_color} 저장된 재촬영 위치가 없어 검증을 생략합니다."
-            )
+        ok = self.verify_floor_count_drop_after_home(
+            f"{target_color} 조립",
+            before_count,
+        )
+        if ok:
+            self.last_verify_visible_poses.pop(target_color, None)
             if home_after_success:
-                self.get_logger().info(
-                    "[VERIFY] 검증 위치 정보는 없지만 기존 로직과 동일하게 성공으로 보고 HOME 이동"
-                )
-                self.call(self.cli_h, Trigger.Request())
-                time.sleep(self.WAIT_TIME)
                 self.post_action_home_done = True
-            return True
-
-        self.get_logger().info(
-            f"[VERIFY] 저장된 재촬영 위치에서 {target_color} 확인 준비: "
-            f"x={scan_request['x']:.4f}m, y={scan_request['y']:.4f}m, "
-            f"z={scan_request['z']:.1f}mm, target_size={scan_request['target_size']}, "
-            f"skip_z={scan_request.get('skip_z', False)}"
-        )
-
-        if self.VERIFY_SCAN_VIA_HOME:
-            self.get_logger().info(
-                "[VERIFY] 바닥 충돌 방지를 위해 gripper 닫은 상태로 HOME을 안전 경유합니다. "
-                "이 HOME은 검증 성공 처리가 아니라 재촬영 높이 기준을 맞추기 위한 경유점입니다."
-            )
-            self.call(self.cli_h, Trigger.Request())
-            time.sleep(self.WAIT_TIME)
-
-            if scan_request.get("skip_z"):
-                self.get_logger().info(
-                    "[VERIFY] 저장 요청이 XY 전용이므로 HOME에서 먼저 재촬영 높이까지 하강합니다."
-                )
-                self.call(
-                    self.cli_r,
-                    GetTargetPose.Request(
-                        z=self.PRE_XY_LOWER,
-                        target_size="Z",
-                    ),
-                )
-                time.sleep(self.WAIT_TIME)
-
-            self.get_logger().info(
-                "[VERIFY] HOME 기준에서 저장된 재촬영 포즈로 이동합니다."
-            )
-            self.call(
-                self.cli_r,
-                GetTargetPose.Request(
-                    x=scan_request["x"],
-                    y=scan_request["y"],
-                    z=scan_request["z"],
-                    yaw=0.0,
-                    target_size=scan_request["target_size"],
-                ),
-            )
-            time.sleep(self.WAIT_TIME)
-
-        else:
-            self.get_logger().warn(
-                "[VERIFY] verify_scan_via_home=False 입니다. "
-                "저장된 z를 직접 쓰지 않고 현재 높이를 유지한 채 XY만 이동합니다. "
-                "비전 스케일이 달라질 수 있으므로 기본값 True 사용을 권장합니다."
-            )
-            self.call(
-                self.cli_r,
-                GetTargetPose.Request(
-                    x=scan_request["x"],
-                    y=scan_request["y"],
-                    z=0.0,
-                    yaw=0.0,
-                    target_size="XY",
-                ),
-            )
-            time.sleep(self.WAIT_TIME)
-
-        expected_x = scan_request.get("expected_x")
-        expected_y = scan_request.get("expected_y")
-        p = self.request_target_pose(target_color)
-        if p is not None and p.success:
-            if expected_x is not None and expected_y is not None:
-                dist_xy = math.hypot(p.x - expected_x, p.y - expected_y)
-                self.get_logger().info(
-                    f"[VERIFY][CANDIDATE] {target_color}, "
-                    f"dist_to_expected={dist_xy * 1000.0:.1f}mm, "
-                    f"x={p.x:.4f}m, y={p.y:.4f}m"
-                )
-
-                if dist_xy <= SAME_CLASS_VERIFY_XY_TOLERANCE_M:
-                    self.last_verify_visible_poses[target_color] = p
-                    self.get_logger().warn(
-                        f"[VERIFY] {target_color}가 목표 위치 근처에 아직 보입니다. "
-                        "조립 실패로 판단합니다. 단, 방금 재촬영에서 얻은 pose를 저장했으므로 "
-                        "HOME 복귀 없이 이 pose 기준으로 바로 다음 조립을 재시도할 수 있습니다."
-                    )
-                    self.get_logger().info(
-                        f"[VERIFY][RETRY POSE] class={target_color}, "
-                        f"x={p.x:.4f}m, y={p.y:.4f}m, z={p.z:.4f}m, yaw={p.yaw:.1f}deg"
-                    )
-                    return False
-            else:
-                self.last_verify_visible_poses[target_color] = p
-                self.get_logger().warn(
-                    f"[VERIFY] {target_color}가 아직 보입니다. 조립 실패로 판단합니다."
-                )
-                return False
-
-        self.last_verify_visible_poses.pop(target_color, None)
-        self.get_logger().info(
-            f"[VERIFY] 목표 위치 근처에서 {target_color}가 보이지 않습니다. "
-            "조립 성공으로 판단합니다."
-        )
-
-        if home_after_success:
-            self.get_logger().info(
-                "[VERIFY] 최종 검증 성공. gripper는 열지 않고 HOME 포즈로 이동합니다."
-            )
-            self.call(self.cli_h, Trigger.Request())
-            time.sleep(self.WAIT_TIME)
-            self.post_action_home_done = True
-
-        return True
+        return ok
 
     def pick_target(
         self,
@@ -918,6 +920,16 @@ class MasterNode(Node):
         다음 파지를 시작할 때는 항상 gripper open 상태를 먼저 보장한다.
         """
         self.get_logger().info(f"--- PICK TARGET: [{color.upper()}] ---")
+
+        home_res = self.call(self.cli_h, Trigger.Request())
+        if home_res is None or not home_res.success:
+            self.get_logger().error("[PICK][COUNT] 파지 전 HOME 이동 실패")
+            return False
+        time.sleep(self.WAIT_TIME)
+
+        before_count = self.read_floor_count_at_home(f"{color} 파지 전")
+        if before_count is None:
+            return False
 
         self.get_logger().info("[GRIPPER] ensure open before pick")
         self.call(self.cli_g, SetBool.Request(data=False))
@@ -944,9 +956,12 @@ class MasterNode(Node):
         self.held_class = str(color).strip()
 
         self.get_logger().info(
-            "[PICK] 파지 완료. HOME 이동 전 별도 Z 상승은 수행하지 않습니다. "
-            "Z_MARGIN은 접근/최종 하강 안전 여유로만 사용합니다."
+            "[PICK] 파지 완료. HOME으로 이동해 decision_assembly block_count 1개 감소를 확인합니다."
         )
+
+        if not self.verify_floor_count_drop_after_home(f"{color} 파지", before_count):
+            self.get_logger().warn(f"[PICK][COUNT] {color} 파지 검증 실패")
+            return False
 
         return True
 
@@ -971,7 +986,8 @@ class MasterNode(Node):
             )
 
         self.get_logger().info(
-            "[VERIFY] HOME 복귀 생략. 현재 검증 위치에서 바로 다음 재조립으로 진행합니다."
+            "[VERIFY] 이미 HOME에서 block_count를 확인한 상태입니다. "
+            "그리퍼를 닫은 채 다음 재조립 시퀀스를 다시 실행합니다."
         )
         return True
 
@@ -993,10 +1009,7 @@ class MasterNode(Node):
         핵심 흐름:
         - 조립 직후에는 release_gripper=True여도 그리퍼를 열지 않는다.
         - HOME 이동 전 별도 Z 상승은 하지 않는다. Z_MARGIN은 접근/최종 하강에만 쓴다.
-        - 그리퍼를 닫은 상태 그대로, 별도 Z 상승 없이 저장된 재촬영 포즈로 이동한다.
-        - 재촬영 위치에서 target_color가 보이면 실패로 판단한다.
-        - 실패 후에는 HOME으로 돌아가지 않고 검증 재촬영에서 얻은 pose로 바로 재조립한다.
-        - target_color가 보이지 않으면 성공으로 판단하고 HOME으로 이동한다.
+        - 조립 전후 /decision_assembly/block_count가 줄어들면 성공으로 판단한다.
         """
         target_color = str(target_color).strip()
 
@@ -1019,7 +1032,7 @@ class MasterNode(Node):
                 p = retry_pose
                 retry_pose = None
                 self.get_logger().info(
-                    "[RETRY WITHOUT HOME] 검증 재촬영 pose로 바로 재조립합니다."
+                    "[RETRY WITHOUT HOME] 저장된 retry pose로 바로 재조립합니다."
                 )
             else:
                 p = base_pose if base_pose is not None else self.find_target_with_retry(
@@ -1031,6 +1044,18 @@ class MasterNode(Node):
 
             self.last_perfect_pose = p
             held_before_insert = self.held_class
+            if self.current_floor_count_at_home is None:
+                self.current_floor_count_at_home = self.read_floor_count_at_home(
+                    f"{target_color} 조립 전"
+                )
+                if self.current_floor_count_at_home is None:
+                    return False
+            self.current_insert_start_count = self.current_floor_count_at_home
+            self.current_insert_verify_after_time = None
+            self.get_logger().info(
+                f"[VERIFY][COUNT] {target_color} 조립 기준 HOME count="
+                f"{self.current_insert_start_count}"
+            )
 
             if not self.move_fast_from_pose(
                 p,
@@ -1043,20 +1068,21 @@ class MasterNode(Node):
                 local_id=local_id,
             ):
                 return False
+            self.current_insert_verify_after_time = time.monotonic()
 
             if release_gripper:
                 self.get_logger().info(
                     "[GRIPPER] release_gripper=True이지만 검증 전이므로 open하지 않습니다. "
-                    "그리퍼를 닫은 상태로 재촬영 포즈까지 이동합니다."
+                    "그리퍼를 닫은 상태로 block_count 검증까지 유지합니다."
                 )
             else:
                 self.get_logger().info(
-                    "[GRIPPER] release_gripper=False, 그리퍼 유지 상태로 재촬영 검증합니다."
+                    "[GRIPPER] release_gripper=False, 그리퍼 유지 상태로 block_count 검증합니다."
                 )
 
             self.get_logger().info(
-                "[VERIFY] 조립 직후 HOME/재촬영 이동 전 별도 Z 상승은 수행하지 않습니다. "
-                "그리퍼를 닫은 현재 자세에서 바로 검증 이동을 시작합니다."
+                "[VERIFY] 조립 직후 HOME으로 이동해 "
+                "decision_assembly block_count 1개 감소를 검증합니다."
             )
 
             if self.verify_insert_from_saved_scan(
@@ -1107,7 +1133,7 @@ class MasterNode(Node):
         visual_insert()와 동일하게:
         - 검증 전에는 그리퍼를 열지 않는다.
         - HOME 이동 전 별도 Z 상승은 하지 않는다. Z_MARGIN은 접근/최종 하강에만 쓴다.
-        - 검증 실패 시 HOME으로 돌아가지 않고 검증 재촬영에서 얻은 pose로 바로 재시도한다.
+        - 조립 전후 /decision_assembly/block_count가 줄어들면 성공으로 판단한다.
         """
         self.get_logger().info(
             f"--- BLIND STACK / MEMORY POSE: "
@@ -1132,10 +1158,23 @@ class MasterNode(Node):
                 current_base_pose = retry_pose
                 retry_pose = None
                 self.get_logger().info(
-                    "[RETRY WITHOUT HOME] 검증 재촬영 pose로 바로 재조립합니다."
+                    "[RETRY WITHOUT HOME] 저장된 retry pose로 바로 재조립합니다."
                 )
             else:
                 current_base_pose = base_pose
+
+            if self.current_floor_count_at_home is None:
+                self.current_floor_count_at_home = self.read_floor_count_at_home(
+                    f"{target_color or 'unknown'} 조립 전"
+                )
+                if self.current_floor_count_at_home is None:
+                    return False
+            self.current_insert_start_count = self.current_floor_count_at_home
+            self.current_insert_verify_after_time = None
+            self.get_logger().info(
+                f"[VERIFY][COUNT] {target_color or 'unknown'} 조립 기준 HOME count="
+                f"{self.current_insert_start_count}"
+            )
 
             if not self.move_fast_from_pose(
                 current_base_pose,
@@ -1146,20 +1185,21 @@ class MasterNode(Node):
                 enable_precision_scan=not use_verify_pose,
             ):
                 return False
+            self.current_insert_verify_after_time = time.monotonic()
 
             if release_gripper:
                 self.get_logger().info(
                     "[GRIPPER] release_gripper=True이지만 검증 전이므로 open하지 않습니다. "
-                    "그리퍼를 닫은 상태로 저장 재촬영 포즈까지 이동합니다."
+                    "그리퍼를 닫은 상태로 block_count 검증까지 유지합니다."
                 )
             else:
                 self.get_logger().info(
-                    "[GRIPPER] release_gripper=False, 그리퍼 유지 상태로 재촬영 검증합니다."
+                    "[GRIPPER] release_gripper=False, 그리퍼 유지 상태로 block_count 검증합니다."
                 )
 
             self.get_logger().info(
-                "[VERIFY] 조립 직후 HOME/재촬영 이동 전 별도 Z 상승은 수행하지 않습니다. "
-                "그리퍼를 닫은 현재 자세에서 바로 검증 이동을 시작합니다."
+                "[VERIFY] 조립 직후 HOME으로 이동해 "
+                "decision_assembly block_count 1개 감소를 검증합니다."
             )
 
             if not target_color:
@@ -1331,30 +1371,35 @@ class MasterNode(Node):
 
         self.call(self.cli_h, Trigger.Request())
 
-        if not self.visual_insert(
+        if self.visual_insert(
             "2x2_red",
             layer_index=0.7,
             release_gripper=False,
             base_pose=red_pose_0,
         ):
+            self.get_logger().info(
+                "[망치] 첫 번째 2x2_red 결합 검증 완료. 남은 2x2_red 결합 시퀀스로 진행합니다."
+            )
+
+            self.call(self.cli_h, Trigger.Request())
+
+            red_pose_1 = self.find_target_with_retry(
+                "2x2_red",
+                exclude_poses=[red_pose_0],
+            )
+            if not red_pose_1:
+                self.get_logger().warn("남은 2x2_red 위치 분리 실패. 망치 조립 취소.")
+                return
+
+            if self.visual_insert(
+                "2x2_red",
+                layer_index=1.5,
+                base_pose=red_pose_1,
+            ):
+                self.get_logger().info("[완료] 망치")
             return
 
-        self.call(self.cli_h, Trigger.Request())
-
-        red_pose_1 = self.find_target_with_retry(
-            "2x2_red",
-            exclude_poses=[red_pose_0],
-        )
-        if not red_pose_1:
-            self.get_logger().warn("남은 2x2_red 위치 분리 실패. 망치 조립 취소.")
-            return
-
-        if self.visual_insert(
-            "2x2_red",
-            layer_index=1.5,
-            base_pose=red_pose_1,
-        ):
-            self.get_logger().info("[완료] 망치")
+        self.get_logger().warn("첫 번째 2x2_red 결합 검증 실패. 망치 조립 취소.")
 
     def build_big_carrot(self):
         self.get_logger().info(
@@ -2043,6 +2088,11 @@ class MasterNode(Node):
         home_res = self.call(self.cli_h, Trigger.Request())
         if home_res is None or not home_res.success:
             self.get_logger().error("시작 HOME 이동 실패. 조립을 시작하지 않습니다.")
+            return
+
+        assembly_res = self.move_robot2_assembly_joint()
+        if assembly_res is None or not assembly_res.success:
+            self.get_logger().error("robot2 assembly_joint 이동 실패. 조립을 시작하지 않습니다.")
             return
 
         self.get_logger().info("[INIT] gripper open")
