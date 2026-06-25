@@ -4,6 +4,7 @@ from vision_pkg import INUVisionLib as ivl
 
 _PKG_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_CAMERA_MODE = "mid_50"
+DEFAULT_CAMERA_SERIAL = "332322072441"
 
 
 def _mark():
@@ -24,7 +25,7 @@ class VisionManager:
         self.class_index = None
 
         self.target = None
-        self.camera_serial = None
+        self.camera_serial = DEFAULT_CAMERA_SERIAL
         self.camera_mode = None
         self.camera_session = None
 
@@ -68,15 +69,7 @@ class VisionManager:
         if self.camera_serial is not None:
             return self.camera_serial
 
-        t_step = _mark()
-        devices = ivl.get_realsense_ids()
-        _log_time("call.capture_camera.get_realsense_ids", t_step)
-
-        if len(devices) == 0:
-            raise RuntimeError("연결된 RealSense 카메라가 없습니다.")
-
-        self.camera_serial = list(devices.keys())[0]
-        return self.camera_serial
+        return DEFAULT_CAMERA_SERIAL
 
 
     def _ensure_camera_session(self, mode="mid_50", V_visualize=False):
