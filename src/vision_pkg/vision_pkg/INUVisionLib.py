@@ -1,4 +1,5 @@
 import os
+import time
 import yaml
 import pprint
 import glob
@@ -10,6 +11,13 @@ import open3d as o3d
 from sklearn.cluster import DBSCAN
 from ultralytics import YOLO
 
+
+def disable_cudnn_conv_backend():
+    torch.backends.cudnn.enabled = False
+
+
+disable_cudnn_conv_backend()
+
 import pyrealsense2 as rs
 import matplotlib.pyplot as plt
 from matplotlib import cm
@@ -19,6 +27,14 @@ import copy
 
 from scipy.spatial.transform import Rotation as R
 SCIPY_AVAILABLE = True
+
+
+def _mark():
+    return time.perf_counter()
+
+
+def _log_time(label, start):
+    print(f"[TIME] {label}: {time.perf_counter() - start:.3f}s")
 
 CAMERA_PROFILES = {
     # 1. 바닥(Floor) 모드: RANSAC 평면 검출용 (넓고 강하게)
@@ -408,21 +424,27 @@ def capture_realsense_data(serial_number, mode="mid_50", warmup_frames=10, visua
 
         return depth_colormap_rgb, depth_m
 
+    t_total = _mark()
+
     print(f"[{mode}] 모드로 카메라(ID: {serial_number}) 구동을 시작합니다...")
 
     # 1. 프로필 파라미터 로드
+    t_step = _mark()
     profile_params = CAMERA_PROFILES.get(mode)
     if profile_params is None:
         raise ValueError(f"지원하지 않는 모드입니다: {mode}")
         
     profile_depth_units = profile_params.get("depth_Units", None)
+    _log_time("lib.capture.profile_load", t_step)
     
     # 2. 카메라 파이프라인 설정 및 구동
+    t_step = _mark()
     pipeline, align, temp_filter, thres_filter = configure_realsense(
         serial_number=serial_number,
         **profile_params,
         visualize=visualize
     )
+    _log_time("lib.capture.configure_realsense_start", t_step)
     
     intrinsics = None
     color_img = None
@@ -433,9 +455,12 @@ def capture_realsense_data(serial_number, mode="mid_50", warmup_frames=10, visua
         # 3. 센서 예열 (안정화)
         if warmup_frames > 0:
             print(f"🔥 센서 안정화 중... ({warmup_frames} 프레임 대기)")
+            t_step = _mark()
             for _ in range(warmup_frames):
                 pipeline.wait_for_frames()
+            _log_time("lib.capture.warmup_frames", t_step)
 
+        t_step = _mark()
         depth_img, color_img, depth_scale, debug_info = get_aligned_frames_with_units(
             pipeline=pipeline,
             align=align,
@@ -444,11 +469,15 @@ def capture_realsense_data(serial_number, mode="mid_50", warmup_frames=10, visua
             profile_depth_units=profile_depth_units,
             apply_filter=True
         )
+        _log_time("lib.capture.get_aligned_frames_with_units", t_step)
             
+        t_step = _mark()
         intrinsics = get_aligned_intrinsics(pipeline)
+        _log_time("lib.capture.get_aligned_intrinsics", t_step)
         
         # 5. 시각화 (옵션)
         if visualize and depth_img is not None and color_img is not None:
+            t_step = _mark()
             # 모드별 가시화 거리 설정
             vis_ranges = {
                 "macro_30": (0.08, 0.35),
@@ -468,15 +497,93 @@ def capture_realsense_data(serial_number, mode="mid_50", warmup_frames=10, visua
             ax.axis("off")
             ax.set_title(f"Capture Result | Mode: {mode} | Scale: {depth_scale:.6f}")
             plt.show()
+            _log_time("lib.capture.visualize", t_step)
 
     except Exception as e:
         print(f"❌ 프레임 캡처 중 에러 발생: {e}")
         
     finally:
+        t_step = _mark()
         pipeline.stop()
         print("✅ 카메라 스트리밍 안전 종료 완료.")
+        _log_time("lib.capture.pipeline_stop", t_step)
+        _log_time("lib.capture.total", t_total)
         
     return color_img, depth_img, intrinsics, depth_scale
+
+
+def start_realsense_capture_session(serial_number, mode="mid_50", warmup_frames=10, visualize=False):
+    t_total = _mark()
+
+    print(f"[{mode}] 모드로 카메라(ID: {serial_number}) 지속 구동을 시작합니다...")
+
+    t_step = _mark()
+    profile_params = CAMERA_PROFILES.get(mode)
+    if profile_params is None:
+        raise ValueError(f"지원하지 않는 모드입니다: {mode}")
+
+    profile_depth_units = profile_params.get("depth_Units", None)
+    _log_time("lib.capture_session.profile_load", t_step)
+
+    t_step = _mark()
+    pipeline, align, temp_filter, thres_filter = configure_realsense(
+        serial_number=serial_number,
+        **profile_params,
+        visualize=visualize
+    )
+    _log_time("lib.capture_session.configure_realsense_start", t_step)
+
+    if warmup_frames > 0:
+        print(f"센서 안정화 중... ({warmup_frames} 프레임 대기)")
+        t_step = _mark()
+        for _ in range(warmup_frames):
+            pipeline.wait_for_frames()
+        _log_time("lib.capture_session.warmup_frames", t_step)
+
+    t_step = _mark()
+    intrinsics = get_aligned_intrinsics(pipeline)
+    _log_time("lib.capture_session.get_aligned_intrinsics", t_step)
+
+    _log_time("lib.capture_session.start_total", t_total)
+
+    return {
+        "serial_number": serial_number,
+        "mode": mode,
+        "pipeline": pipeline,
+        "align": align,
+        "temp_filter": temp_filter,
+        "thres_filter": thres_filter,
+        "profile_depth_units": profile_depth_units,
+        "intrinsics": intrinsics,
+    }
+
+
+def capture_realsense_session_frame(session, apply_filter=True):
+    t_total = _mark()
+
+    depth_img, color_img, depth_scale, debug_info = get_aligned_frames_with_units(
+        pipeline=session["pipeline"],
+        align=session["align"],
+        temp_filter=session["temp_filter"],
+        thres_filter=session["thres_filter"],
+        profile_depth_units=session.get("profile_depth_units"),
+        apply_filter=apply_filter
+    )
+    _log_time("lib.capture_session.get_aligned_frames_with_units", t_total)
+
+    return color_img, depth_img, session["intrinsics"], depth_scale
+
+
+def stop_realsense_capture_session(session):
+    if session is None:
+        return
+
+    pipeline = session.get("pipeline")
+    if pipeline is not None:
+        t_step = _mark()
+        pipeline.stop()
+        print("카메라 지속 스트리밍 종료 완료.")
+        _log_time("lib.capture_session.pipeline_stop", t_step)
 
 def get_aligned_intrinsics(pipeline):
     """
@@ -1555,22 +1662,31 @@ def detect_objects_yolo(model, color_img_bgr, target_classes=None, visualize=Fal
         vis_yolo (ndarray): 바운딩 박스와 라벨이 그려진 시각화용 이미지 (BGR)
     """
 
+    t_total = _mark()
+
+    disable_cudnn_conv_backend()
+
     # 1. 원본 이미지 크기 파악 (마스크 리사이즈용)
     img_height, img_width = color_img_bgr.shape[:2]
     
     # 2. 모델 추론 (클래스 필터링 적용)
+    t_step = _mark()
     if target_classes is not None:
         results = model(color_img_bgr, classes=target_classes, verbose=False)
     else:
         results = model(color_img_bgr, verbose=False)
+    _log_time("lib.yolo.detect.inference", t_step)
 
     # 3. 마스크 병합용 빈 도화지 생성
     mask_binary = np.zeros((img_height, img_width), dtype=np.uint8)
     
     # YOLO의 내장 시각화 결과 이미지 생성
+    t_step = _mark()
     vis_yolo = results[0].plot()
+    _log_time("lib.yolo.detect.plot", t_step)
 
     # 4. 검출된 마스크 합치기
+    t_step = _mark()
     if len(results) > 0 and results[0].masks is not None:
         masks = results[0].masks.data.cpu().numpy()
         
@@ -1583,6 +1699,7 @@ def detect_objects_yolo(model, color_img_bgr, target_classes=None, visualize=Fal
         print(f"🎯 [SUCCESS] {len(masks)}개의 타겟 객체 마스크 병합 완료")
     else:
         print("⚠️ [WARN] 지정된 클래스의 객체가 검출되지 않았거나, 마스크가 없습니다.")
+    _log_time("lib.yolo.detect.mask_merge", t_step)
 
     # 5. 시각화 (옵션)
     if visualize:
@@ -1607,6 +1724,7 @@ def detect_objects_yolo(model, color_img_bgr, target_classes=None, visualize=Fal
         plt.tight_layout()
         plt.show()
 
+    _log_time("lib.yolo.detect.total", t_total)
     return results, mask_binary, vis_yolo
 
     # YOLOv8 세그멘테이션 결과에서 겹치는 마스크를 병합하고 오검출을 정리하는 함수.
@@ -4996,6 +5114,8 @@ def fine_correct(final_obj_fine,
 
 def search_bricks(mode, yolo_dir, color_rgb, depth, intrinsics, scale, V_visualize=True):
 
+    t_total = _mark()
+
     if mode in ["coarse", "fine"]:
         pass
     else:
@@ -5021,15 +5141,19 @@ def search_bricks(mode, yolo_dir, color_rgb, depth, intrinsics, scale, V_visuali
     if not os.path.exists(MODEL_PATH):
         raise FileNotFoundError(f"YOLO model not found: {MODEL_PATH}")
 
+    t_step = _mark()
     model = YOLO(MODEL_PATH)
+    _log_time("lib.search_bricks.load_yolo_model", t_step)
     target_classes = [0, 1, 2, 3, 4, 5, 6, 7, 8]
 
+    t_step = _mark()
     results, mask_binary, vis_yolo = detect_objects_yolo(
         model= model, 
         color_img_bgr=color_img_bgr, 
         target_classes=target_classes, 
         visualize=V_visualize
     )
+    _log_time("lib.search_bricks.detect_objects_yolo", t_step)
 
     if V_visualize:
 
@@ -5052,18 +5176,21 @@ def search_bricks(mode, yolo_dir, color_rgb, depth, intrinsics, scale, V_visuali
 
 
     # 바운딩 박스가 겹치는 부분을 억제 = 겹치는 마스크 깔끔하게 정리
+    t_step = _mark()
     final_objects, clean_mask = filter_overlapping_masks(
         results=results, 
         overlap_threshold=0.70, 
         img_shape=(640, 480), 
         visualize=V_visualize
     )
+    _log_time("lib.search_bricks.filter_overlapping_masks", t_step)
 
     #======================================================================================
     # 높이 차이 확인 + 바운딩 박스 비율 기반 ID 수정 + Convex Hull로 패딩
     #======================================================================================
 
     # DBSCAN + RANSAC 바닥 검출
+    t_step = _mark()
     mask_40mm_2d, refined_color, contours, plane_model = extract_3d_protruding_objects(
         depth_img=depth, 
         color_img_bgr=color_img_bgr, 
@@ -5074,8 +5201,10 @@ def search_bricks(mode, yolo_dir, color_rgb, depth, intrinsics, scale, V_visuali
         height_threshold=0.040,
         visualize=V_visualize
     )
+    _log_time("lib.search_bricks.extract_3d_protruding_objects", t_step)
 
     # ID 판독 및 교정 4*2 or 2*2 변경
+    t_step = _mark()
     final_objects, result_vis_img = correct_object_ids(
         detected_objects=final_objects, 
         mask_high_2d=mask_40mm_2d, 
@@ -5084,11 +5213,13 @@ def search_bricks(mode, yolo_dir, color_rgb, depth, intrinsics, scale, V_visuali
         overlap_threshold=0.20, 
         visualize=V_visualize
     )
+    _log_time("lib.search_bricks.correct_object_ids", t_step)
 
     # Convex Hull로 내부 채우기
     mask_before = np.zeros(color_img_bgr.shape[:2], dtype=np.uint8)
     mask_hull_after = np.zeros(color_img_bgr.shape[:2], dtype=np.uint8)
 
+    t_step = _mark()
     for obj in final_objects:
         original_mask = (obj["mask"] > 0).astype(np.uint8)
 
@@ -5104,6 +5235,7 @@ def search_bricks(mode, yolo_dir, color_rgb, depth, intrinsics, scale, V_visuali
         # 전체 before / after 통합 마스크
         mask_before = np.logical_or(mask_before, original_mask > 0).astype(np.uint8)
         mask_hull_after = np.logical_or(mask_hull_after, hull_mask > 0).astype(np.uint8)
+    _log_time("lib.search_bricks.convex_hull_masks", t_step)
 
     # ============================================================
     # Hull 적용 완료된 final_objects를 fine 처리용으로 복사
@@ -5159,6 +5291,7 @@ def search_bricks(mode, yolo_dir, color_rgb, depth, intrinsics, scale, V_visuali
     # Convex Hull + 마스크 기준으로 바닥/PCD 재생성 + 3D OBB 생성
     # =================================================================
 
+    t_step = _mark()
     pcd_data, plane_data, floor_pcd = build_floor_scene_data_from_depth(
         depth_img=depth,
         intrinsics=intrinsics,
@@ -5170,8 +5303,10 @@ def search_bricks(mode, yolo_dir, color_rgb, depth, intrinsics, scale, V_visuali
         floor_height_eps=0.005,
         visualize=V_visualize
     )
+    _log_time("lib.search_bricks.build_floor_scene_data_from_depth", t_step)
 
     # OBB 재생성
+    t_step = _mark()
     objects_obb, vis_3d, overlay_3d, vis_2d_rgb, obb_results = generate_3d_obbs_from_hull_objects(
         objects=final_objects,
         refined_mask_01=mask_hull_after,
@@ -5185,6 +5320,7 @@ def search_bricks(mode, yolo_dir, color_rgb, depth, intrinsics, scale, V_visuali
         height_percentile=95,
         visualize_2d=V_visualize
     )
+    _log_time("lib.search_bricks.generate_3d_obbs_from_hull_objects", t_step)
 
     # =================================================================
     # 3D OBB 기준 객체 좌표계 + Camera 기준 RPY 계산
@@ -5194,6 +5330,7 @@ def search_bricks(mode, yolo_dir, color_rgb, depth, intrinsics, scale, V_visuali
     axes_geometries = []
     plane_normal = plane_data["normal"]
 
+    t_step = _mark()
     for idx, obj in enumerate(objects_obb):
         obb_3d = obj.get("obb_3d", None)
         class_name = obj.get("class_name", "unknown")
@@ -5233,6 +5370,7 @@ def search_bricks(mode, yolo_dir, color_rgb, depth, intrinsics, scale, V_visuali
         # )
 
         # 기존 3D OBB geometry에 좌표축 추가
+    _log_time("lib.search_bricks.estimate_pose_axes_loop", t_step)
     vis_3d_with_axes = vis_3d + axes_geometries
     overlay_3d_with_axes = overlay_3d + axes_geometries
 
@@ -5243,6 +5381,7 @@ def search_bricks(mode, yolo_dir, color_rgb, depth, intrinsics, scale, V_visuali
             window_name="3D OBB + Object XYZ Axes"
         )
 
+    t_step = _mark()
     color_o3d = o3d.geometry.Image(color_rgb)
     depth_o3d = o3d.geometry.Image(cv2.medianBlur(depth, 5))
 
@@ -5271,6 +5410,7 @@ def search_bricks(mode, yolo_dir, color_rgb, depth, intrinsics, scale, V_visuali
     rgb_pcd = rgb_pcd.voxel_down_sample(voxel_size=0.0015)
 
     final_overlay_elements = [rgb_pcd] + overlay_3d_with_axes
+    _log_time("lib.search_bricks.rgbd_pointcloud_overlay", t_step)
 
     if V_visualize:
         print("\n[INFO] RGB-D PointCloud + 3D OBB + Object Axes 표시")
@@ -5279,6 +5419,7 @@ def search_bricks(mode, yolo_dir, color_rgb, depth, intrinsics, scale, V_visuali
             window_name="RGB-D PointCloud + Object XYZ Axes"
         )
 
+    t_step = _mark()
     pose_table, class_index = build_class_sorted_pose_index(
         objects_obb=objects_obb,
         use_pose_cam=True,
@@ -5286,6 +5427,7 @@ def search_bricks(mode, yolo_dir, color_rgb, depth, intrinsics, scale, V_visuali
         remove_side2=False,
         verbose=False
     )
+    _log_time("lib.search_bricks.build_class_sorted_pose_index", t_step)
 
     if mode == 'fine':
 
@@ -5293,6 +5435,7 @@ def search_bricks(mode, yolo_dir, color_rgb, depth, intrinsics, scale, V_visuali
             print("이제 파인으로 진입합니다.")
 
         # final_obj_fine 기준으로 dilation 적용
+        t_step = _mark()
         final_obj_fine_a, mask_dilate_before, mask_dilate_after, dilate_vis_img = dilate_final_objects(
             final_obj_fine=final_obj_fine,
             image_shape=color_img_bgr.shape[:2],
@@ -5302,7 +5445,9 @@ def search_bricks(mode, yolo_dir, color_rgb, depth, intrinsics, scale, V_visuali
             visualize=V_visualize,
             color_img_bgr=color_img_bgr
         )
+        _log_time("lib.search_bricks.fine.dilate_final_objects", t_step)
 
+        t_step = _mark()
         pose_table, class_index = fine_correct(
                     final_obj_fine=final_obj_fine_a,
                     color_rgb=color_rgb,
@@ -5311,7 +5456,9 @@ def search_bricks(mode, yolo_dir, color_rgb, depth, intrinsics, scale, V_visuali
                     intrinsics=intrinsics,
                     V_visualize=V_visualize
                 )
+        _log_time("lib.search_bricks.fine.fine_correct", t_step)
 
+    _log_time("lib.search_bricks.total", t_total)
     return pose_table, class_index 
 
 def search_assembly(
@@ -5370,6 +5517,10 @@ def search_assembly(
         X, Y, Z, YAW = get_target_grasp_pose(class_index, target_class)
     """
 
+    t_total = _mark()
+
+    disable_cudnn_conv_backend()
+
     if color_rgb is None or depth is None or intrinsics is None or scale is None:
         raise RuntimeError("RealSense 캡처 실패: color/depth/intrinsics/scale 중 None이 있습니다.")
 
@@ -5379,6 +5530,7 @@ def search_assembly(
     # ------------------------------------------------------------
     # 0. 이미지 정리
     # ------------------------------------------------------------
+    t_step = _mark()
     color_img_rgb = color_rgb.copy()
     if color_img_rgb.dtype != np.uint8:
         color_img_rgb = np.clip(color_img_rgb, 0, 255).astype(np.uint8)
@@ -5387,16 +5539,21 @@ def search_assembly(
     depth_scale = scale
 
     H, W = depth_img.shape[:2]
+    _log_time("lib.search_assembly.prepare_images", t_step)
 
     # ------------------------------------------------------------
     # 1. YOLO 모델 준비
     # ------------------------------------------------------------
+    t_step = _mark()
     if yolo_model is None:
         from ultralytics import YOLO
         yolo_model = YOLO(yolo_dir)
+    _log_time("lib.search_assembly.prepare_yolo_model", t_step)
 
     # ultralytics 입력은 BGR도 가능하지만, 기존 OpenCV 흐름에 맞춰 BGR 사용
+    t_step = _mark()
     color_img_bgr = cv2.cvtColor(color_img_rgb, cv2.COLOR_RGB2BGR)
+    _log_time("lib.search_assembly.cvt_color", t_step)
 
     # ------------------------------------------------------------
     # 2. YOLOv8 segmentation 추론
@@ -5412,18 +5569,23 @@ def search_assembly(
     if target_classes is not None:
         yolo_kwargs["classes"] = target_classes
 
+    t_step = _mark()
     results = yolo_model(color_img_bgr, **yolo_kwargs)
+    _log_time("lib.search_assembly.yolo_inference", t_step)
 
     if len(results) == 0 or results[0].masks is None:
         print("[WARN] YOLO segmentation mask가 없습니다.")
+        _log_time("lib.search_assembly.total", t_total)
         return [], {}
 
     result0 = results[0]
 
+    t_step = _mark()
     masks = result0.masks.data.cpu().numpy()
     boxes = result0.boxes
     class_ids = boxes.cls.cpu().numpy().astype(int)
     confidences = boxes.conf.cpu().numpy()
+    _log_time("lib.search_assembly.result_to_cpu", t_step)
 
     # YOLO class id -> class name
     yolo_names = result0.names
@@ -5431,11 +5593,13 @@ def search_assembly(
     # ------------------------------------------------------------
     # 3. depth -> xyz_map 생성
     # ------------------------------------------------------------
+    t_step = _mark()
     xyz_map, valid_mask = depth_to_xyz_map(
         depth_img=depth_img,
         depth_scale=depth_scale,
         intrinsics=intrinsics
     )
+    _log_time("lib.search_assembly.depth_to_xyz_map", t_step)
 
     # ------------------------------------------------------------
     # 4. YOLO instance mask별 contour/PCA/pose 생성
@@ -5444,6 +5608,7 @@ def search_assembly(
     combined_mask = np.zeros((H, W), dtype=np.uint8)
     all_contour_objects_for_vis = []
 
+    t_step = _mark()
     for det_idx, mask in enumerate(masks):
         class_id = int(class_ids[det_idx])
         yolo_class_name = str(yolo_names[class_id])
@@ -5561,10 +5726,12 @@ def search_assembly(
             }
 
             pose_table.append(pose)
+    _log_time("lib.search_assembly.instance_pose_loop", t_step)
 
     # ------------------------------------------------------------
     # 5. 가까운 순서로 전체 정렬
     # ------------------------------------------------------------
+    t_step = _mark()
     pose_table = sorted(pose_table, key=lambda p: p["z_mm"])
 
     for global_idx, pose in enumerate(pose_table):
@@ -5590,6 +5757,7 @@ def search_assembly(
 
         for local_id, pose in enumerate(poses_sorted):
             pose["local_id"] = local_id
+    _log_time("lib.search_assembly.sort_and_index", t_step)
 
     # ------------------------------------------------------------
     # 7. 시각화
@@ -5709,6 +5877,7 @@ def search_assembly(
     for cname, poses in class_index.items():
         print(f"{cname}: {len(poses)}개")
 
+    _log_time("lib.search_assembly.total", t_total)
     return pose_table, class_index
 
 def search_assembly_fine(color_rgb, depth, intrinsics, scale, V_visualize=True):

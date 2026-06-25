@@ -235,8 +235,8 @@ import numpy as np
 ROBOT_CONFIGS = {
     "robot1": {
         "ip": "10.0.2.7",
-        "cam_x_off": -51.383,
-        "cam_y_off": 32.485,
+        "cam_x_off": -51.5, # 바깥으로 가고싶으면 음수, 몸쪽으로 오고 싶으면 양수
+        "cam_y_off": 29.485, #32.485
         "home_joint": [-90.0, 6.67, 35.34, 0.0, 138.0, 0.0],
         "end_joint": [-90.0, -65.0, 110.0, 0.0, 140.0, 0.0],
         "center_joint": [-108.2, -10.14, 104.67, 0.0, 85.48, -18.2],
@@ -398,6 +398,14 @@ class DualRobotNode(Node):
                 pose = np.array([dy, dx, req.z, 0, 0, req.yaw], dtype=float)
                 robot.move_l_rel(rc, pose, self.L_VEL, self.L_ACC, rb.ReferenceFrame.Tool)
                 self.wait_move(robot_name, f"APPROACH_DELTA(yaw={req.yaw:.1f})")
+
+            elif req.target_size == "HOME_X_SEARCH":
+                # HOME 기준 좌우 탐색 전용.
+                # Tool 프레임으로 HOME에서 바로 밀면 관절이 더 펴질 수 있어
+                # Base 프레임 기준 직선 이동으로 x축 탐색만 수행한다.
+                pose = np.array([req.x * 1000.0, 0, 0, 0, 0, 0], dtype=float)
+                robot.move_l_rel(rc, pose, self.L_VEL, self.L_ACC, rb.ReferenceFrame.Base)
+                self.wait_move(robot_name, f"HOME_X_SEARCH(x={req.x * 1000.0:.1f}mm)")
 
             elif req.target_size == "SEPARATION":
                 if handle.get("separation_waypoint") is not None:

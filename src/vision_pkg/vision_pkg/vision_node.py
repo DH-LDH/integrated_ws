@@ -1,4 +1,5 @@
 # vision_node.py
+import time
 import rclpy
 from rclpy.node import Node
 from srvs_pkg.srv import GetTargetPose
@@ -11,10 +12,19 @@ class VisionNode(Node):
         self.get_logger().info('[VISION] 초기화 중... VisionManager 로드')
         
         self.vision = ivc.VisionManager()
-        self.get_logger().info('[VISION] vision_node 시작 완료 (INUVisionLib 기반)')
+        self.get_logger().info('[VISION] RealSense 카메라 지속 스트리밍 시작 중...')
+        self.vision.start_camera(mode="mid_50", V_visualize=False)
+        self.get_logger().info('[VISION] vision_node 시작 완료 (카메라 지속 구동 모드)')
+
+
+    def destroy_node(self):
+        if hasattr(self, 'vision'):
+            self.vision.close()
+        super().destroy_node()
 
 
     def get_pose_cb(self, request, response):
+        t_total = time.perf_counter()
         target_str = request.target_color.strip()
         self.get_logger().info(f'[VISION] 서비스 요청 수신 - target ID: {target_str}')
 
@@ -24,17 +34,24 @@ class VisionNode(Node):
                     f'[VISION] 잘못된 입력입니다. 숫자 ID를 입력하세요: {target_str}'
                 )
                 response.success = False
+                self.get_logger().info(
+                    f'[TIME] node.service_cb.total: {time.perf_counter() - t_total:.3f}s'
+                )
                 return response
 
             target_id = int(target_str)
 
+            t_step = time.perf_counter()
             result = self.vision.run_pipeline_by_id(
                 target_id=target_id,
                 local_id=0,
                 camera_mode="mid_50",
                 brick_search_mode="fine",
                 V_visualize_capture=False,
-                V_visualize_search=False
+                V_visualize_search=False 
+            )
+            self.get_logger().info(
+                f'[TIME] node.run_pipeline_by_id: {time.perf_counter() - t_step:.3f}s'
             )
 
             if result["success"]:
@@ -45,7 +62,7 @@ class VisionNode(Node):
                 response.x = float(result["x_mm"] / 1000.0)
                 response.y = float(result["y_mm"] / 1000.0)
                 response.z = float(result["z_mm"] / 1000.0)
-                response.yaw = float(result["yaw_deg"])
+                response.yaw = float(result["yaw_deg"] - 90.0 ) 
                 response.class_name = str(result["class_name"])
 
                 self.get_logger().info(
@@ -71,6 +88,9 @@ class VisionNode(Node):
             self.get_logger().error(f'[VISION] 처리 중 심각한 오류 발생: {e}')
             response.success = False
 
+        self.get_logger().info(
+            f'[TIME] node.service_cb.total: {time.perf_counter() - t_total:.3f}s'
+        )
         return response
 
 
@@ -88,5 +108,3 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
-
-

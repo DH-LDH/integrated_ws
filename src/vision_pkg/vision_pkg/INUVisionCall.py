@@ -1,7 +1,17 @@
 import os
+import time
 from vision_pkg import INUVisionLib as ivl
 
 _PKG_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_CAMERA_MODE = "mid_50"
+
+
+def _mark():
+    return time.perf_counter()
+
+
+def _log_time(label, start):
+    print(f"[TIME] {label}: {time.perf_counter() - start:.3f}s")
 
 class VisionManager:
     def __init__(self):
@@ -14,6 +24,9 @@ class VisionManager:
         self.class_index = None
 
         self.target = None
+        self.camera_serial = None
+        self.camera_mode = None
+        self.camera_session = None
 
         self.yolo_dir_component = os.path.join(_PKG_DIR, 'yolo_models', 'Component_Model_ver1.0', 'Model_s_ver2.0', 'best.pt')
         self.yolo_dir_brick = os.path.join(_PKG_DIR, 'yolo_models', 'Block_m_ver1.0', 'Block_s_ver1.0', 'best.pt')
@@ -44,26 +57,79 @@ class VisionManager:
         }
 
 
-    def capture_camera(self, mode="mid_50", V_visualize=False):
+    def start_camera(self, mode=DEFAULT_CAMERA_MODE, V_visualize=False):
+        self._ensure_camera_session(
+            mode=mode,
+            V_visualize=V_visualize
+        )
 
+
+    def _get_camera_serial(self):
+        if self.camera_serial is not None:
+            return self.camera_serial
+
+        t_step = _mark()
         devices = ivl.get_realsense_ids()
+        _log_time("call.capture_camera.get_realsense_ids", t_step)
 
         if len(devices) == 0:
             raise RuntimeError("연결된 RealSense 카메라가 없습니다.")
-        target_serial = list(devices.keys())[0]
 
-        # 캡처한 데이터를 클래스 내부 보관함(self)에 저장
-        print("[INFO] 카메라 데이터 캡처 중...")
-        self.color_rgb, self.depth, self.intrinsics, self.scale = ivl.capture_realsense_data(
-            serial_number=target_serial, 
-            mode=mode, 
+        self.camera_serial = list(devices.keys())[0]
+        return self.camera_serial
+
+
+    def _ensure_camera_session(self, mode="mid_50", V_visualize=False):
+        if self.camera_session is not None and self.camera_mode == mode:
+            return self.camera_session
+
+        if self.camera_session is not None:
+            ivl.stop_realsense_capture_session(self.camera_session)
+            self.camera_session = None
+            self.camera_mode = None
+
+        t_step = _mark()
+        self.camera_session = ivl.start_realsense_capture_session(
+            serial_number=self._get_camera_serial(),
+            mode=mode,
             warmup_frames=10,
             visualize=V_visualize
         )
+        self.camera_mode = mode
+        _log_time("call.capture_camera.start_session", t_step)
+
+        return self.camera_session
+
+
+    def close(self):
+        if self.camera_session is not None:
+            ivl.stop_realsense_capture_session(self.camera_session)
+            self.camera_session = None
+            self.camera_mode = None
+
+
+    def capture_camera(self, mode="mid_50", V_visualize=False):
+
+        t_total = _mark()
+
+        # 캡처한 데이터를 클래스 내부 보관함(self)에 저장
+        print("[INFO] 지속 구동 중인 카메라에서 프레임 캡처 중...")
+        session = self._ensure_camera_session(
+            mode=mode,
+            V_visualize=V_visualize
+        )
+        t_step = _mark()
+        self.color_rgb, self.depth, self.intrinsics, self.scale = ivl.capture_realsense_session_frame(
+            session=session,
+            apply_filter=True
+        )
+        _log_time("call.capture_camera.capture_session_frame", t_step)
+        _log_time("call.capture_camera.total", t_total)
         return self.color_rgb, self.depth, self.intrinsics, self.scale
 
     def run_search(self, mode, V_visualize=False):
 
+        t_total = _mark()
         if self.color_rgb is None:
             raise RuntimeError("카메라 데이터가 없습니다. 먼저 capture_camera()를 실행하세요.")
 
@@ -76,10 +142,12 @@ class VisionManager:
                                                             V_visualize=V_visualize
                                                             )
 
+        _log_time("call.run_search.brick_total", t_total)
         return self.pose_table, self.class_index
 
     def run_search_assembly(self,V_visualize=False):
 
+        t_total = _mark()
         print("[INFO] 조립체 객체 탐색(Search Assembly) 실행 중...")
 
         if self.color_rgb is None:
@@ -111,6 +179,7 @@ class VisionManager:
                                                                 min_valid_depth_points=30
                                                             )
 
+        _log_time("call.run_search_assembly.total", t_total)
         return self.pose_table, self.class_index
 
     def get_pose_by_id(self, target_id, local_id=0):
@@ -126,6 +195,8 @@ class VisionManager:
         실패 시:
             None, None, None, None
         """
+
+        t_total = _mark()
 
         # ------------------------------------------------------------
         # 1. ID -> class name 변환
@@ -168,6 +239,7 @@ class VisionManager:
             matched_key
         )
 
+        _log_time("call.get_pose_by_id.total", t_total)
         return X, Y, Z, YAW
 
     def run_pipeline_by_id(
@@ -209,6 +281,8 @@ class VisionManager:
             }
         """
 
+        t_total = _mark()
+
         # ------------------------------------------------------------
         # 0. ID 그룹 정의
         # ------------------------------------------------------------
@@ -238,6 +312,7 @@ class VisionManager:
             target_id = int(target_id)
         except Exception:
             print(f"[ERROR] target_id를 int로 변환할 수 없습니다: {target_id}")
+            _log_time("pipeline.total", t_total)
             return {
                 "success": False,
                 "target_id": None,
@@ -253,6 +328,7 @@ class VisionManager:
         if target_class_name is None:
             print(f"[ERROR] 등록되지 않은 ID 번호입니다: {target_id}")
             print(f"[INFO] 등록된 ID 목록: {list(self.id_to_class.keys())}")
+            _log_time("pipeline.total", t_total)
             return {
                 "success": False,
                 "target_id": target_id,
@@ -265,10 +341,12 @@ class VisionManager:
         # ------------------------------------------------------------
         # 3. 카메라 캡처
         # ------------------------------------------------------------
+        t_step = _mark()
         self.capture_camera(
             mode=camera_mode,
             V_visualize=V_visualize_capture
         )
+        _log_time("pipeline.capture_camera", t_step)
 
         # ------------------------------------------------------------
         # 4. ID 그룹에 따라 Search 분기
@@ -276,21 +354,26 @@ class VisionManager:
         if target_id in BRICK_IDS:
             print(f"[VISION] 일반 브릭 탐색 실행: ID={target_id}, class={target_class_name}")
 
+            t_step = _mark()
             self.run_search(
                 mode=brick_search_mode,
                 V_visualize=V_visualize_search
             )
+            _log_time("pipeline.search_bricks", t_step)
 
         elif target_id in COMPONENT_IDS:
             print(f"[VISION] 컴포넌트 YOLO-Seg 탐색 실행: ID={target_id}, class={target_class_name}")
 
+            t_step = _mark()
             self.run_search_assembly(
                 V_visualize=V_visualize_search
             )
+            _log_time("pipeline.search_assembly", t_step)
 
         else:
             print(f"[ERROR] 탐색 분기 미지정 ID입니다: {target_id}")
 
+            _log_time("pipeline.total", t_total)
             return {
                 "success": False,
                 "target_id": target_id,
@@ -301,14 +384,17 @@ class VisionManager:
         # ------------------------------------------------------------
         # 5. Search 결과에서 pose 추출
         # ------------------------------------------------------------
+        t_step = _mark()
         X, Y, Z, YAW = self.get_pose_by_id(
             target_id=target_id,
             local_id=local_id
         )
+        _log_time("pipeline.get_pose_by_id", t_step)
 
         if X is None or Y is None or Z is None or YAW is None:
             print(f"[WARNING] 시야에서 타겟을 찾지 못했습니다: ID={target_id}, class={target_class_name}")
 
+            _log_time("pipeline.total", t_total)
             return {
                 "success": False,
                 "target_id": target_id,
@@ -334,6 +420,7 @@ class VisionManager:
             f"  ID={target_id}, class={target_class_name}, "
             f"X={X:.1f}mm, Y={Y:.1f}mm, Z={Z:.1f}mm, Yaw={YAW:.2f}deg"
         )
+        _log_time("pipeline.total", t_total)
 
         return result
 

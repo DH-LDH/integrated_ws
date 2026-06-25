@@ -10,6 +10,7 @@ manager 쪽 인터페이스(wb_task)는 mock_wb_node와 동일하게 유지한�
 """
 
 import time
+import threading
 
 import rclpy
 from rclpy.node import Node
@@ -65,6 +66,7 @@ class WbCommandNode(Node):
     def __init__(self):
         super().__init__('wb_command_node')
         self.cbg = ReentrantCallbackGroup()
+        self.command_lock = threading.RLock()
 
         # 조립/분해 마스터 인스턴스 생성
         # (둘 다 __init__에서 클라이언트만 만들고 HW에는 직접 연결하지 않음)
@@ -84,6 +86,12 @@ class WbCommandNode(Node):
             callback_group=self.cbg,
         )
         self.get_logger().info('[CMD] wb_task 분배 노드 시작')
+
+        self.keyboard_thread = threading.Thread(
+            target=self.keyboard_loop,
+            daemon=True,
+        )
+        self.keyboard_thread.start()
 
     # ──────────────────────────────────────────────────────
     @staticmethod
@@ -116,12 +124,13 @@ class WbCommandNode(Node):
         goal_handle.publish_feedback(fb)
 
         try:
-            if work_type == 'PRODUCE':
-                ok, reason = self._run_assembly(product_id, goal_handle)
-            elif work_type == 'RECYCLE':
-                ok, reason = self._run_disassembly(product_id, goal_handle)
-            else:
-                ok, reason = False, f'UNKNOWN_WORK_TYPE:{work_type}'
+            with self.command_lock:
+                if work_type == 'PRODUCE':
+                    ok, reason = self._run_assembly(product_id, goal_handle)
+                elif work_type == 'RECYCLE':
+                    ok, reason = self._run_disassembly(product_id, goal_handle)
+                else:
+                    ok, reason = False, f'UNKNOWN_WORK_TYPE:{work_type}'
         except Exception as e:
             self.get_logger().error(f'[CMD] 실행 예외: {e}')
             ok, reason = False, f'EXCEPTION:{e}'
@@ -164,6 +173,10 @@ class WbCommandNode(Node):
 
         # 마무리: HOME 복귀
         a.call(a.cli_h, Trigger.Request())
+        time.sleep(1.0)
+        a.call(a.cli_g, SetBool.Request(data=False))
+        time.sleep(a.WAIT_TIME)
+        a.move_robot_end()
 
         # build_* 계열은 반환값이 없어(성공/실패 미구분) 예외만 없으면 성공으로 본다.
         return True, ''
@@ -190,7 +203,71 @@ class WbCommandNode(Node):
         # run_*_once 계열은 실패 시 False를 반환한다 (None/True는 성공)
         if ret is False:
             return False, 'DISASSEMBLY_FAILED'
+
+        if not d.move_both_end_pose():
+            return False, 'DISASSEMBLY_END_FAILED'
+
         return True, ''
+
+    # ──────────────────────────────────────────────────────
+    # Keyboard manual pose commands
+    # ──────────────────────────────────────────────────────
+    def keyboard_loop(self):
+        print("\n[WB Command Keyboard]")
+        print("  home / h        : robot1 HOME")
+        print("  end / e         : robot1 END")
+        print("  home2 / h2      : robot2 HOME")
+        print("  end2 / e2       : robot2 END")
+        print("  home_all / ha   : both HOME")
+        print("  end_all / ea    : both END")
+        print("  quit / q        : shutdown command node")
+
+        while rclpy.ok():
+            try:
+                command = input("wb-command> ").strip().lower()
+            except EOFError:
+                return
+
+            if not command:
+                continue
+
+            try:
+                with self.command_lock:
+                    if command in ("home", "h"):
+                        self.get_logger().info("[KEYBOARD] robot1 HOME")
+                        self.assembler.call(
+                            self.assembler.cli_h,
+                            Trigger.Request(),
+                        )
+                    elif command in ("end", "e"):
+                        self.get_logger().info("[KEYBOARD] robot1 END")
+                        self.assembler.move_robot_end()
+                    elif command in ("home2", "h2"):
+                        self.get_logger().info("[KEYBOARD] robot2 HOME")
+                        self.disassembler.call(
+                            self.disassembler.cli_h2,
+                            Trigger.Request(),
+                        )
+                    elif command in ("end2", "e2"):
+                        self.get_logger().info("[KEYBOARD] robot2 END")
+                        self.disassembler.send_pose(
+                            self.disassembler.cli_r2,
+                            "END",
+                        )
+                    elif command in ("home_all", "homeall", "ha"):
+                        self.get_logger().info("[KEYBOARD] both HOME")
+                        self.disassembler.move_both_home_pose()
+                    elif command in ("end_all", "endall", "ea"):
+                        self.get_logger().info("[KEYBOARD] both END")
+                        self.disassembler.move_both_end_pose()
+                    elif command in ("quit", "exit", "q", "종료"):
+                        self.get_logger().info("[KEYBOARD] shutdown requested")
+                        rclpy.shutdown()
+                        return
+                    else:
+                        print("Use: home/end/home2/end2/home_all/end_all/quit")
+            except Exception as e:
+                self.get_logger().error(f"[KEYBOARD] command failed: {e}")
 
 
 def main(args=None):
