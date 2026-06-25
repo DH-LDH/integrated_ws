@@ -184,6 +184,9 @@ class WbCommandNode(Node):
         a.call(a.cli_g, SetBool.Request(data=False))
         time.sleep(a.WAIT_TIME)
         a.move_robot_end()
+        robot2_end_res = a.move_robot2_end()
+        if robot2_end_res is None or not robot2_end_res.success:
+            return False, 'ROBOT2_END_FAILED'
 
         # build_* 계열은 반환값이 없어(성공/실패 미구분) 예외만 없으면 성공으로 본다.
         return True, ''

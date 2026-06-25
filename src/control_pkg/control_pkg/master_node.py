@@ -20,7 +20,7 @@ WAIT_TIME_DEFAULT    =   1.5   # 모션 완료 후 대기 시간 (s)
 PRE_XY_LOWER_DEFAULT = 80.0   # 정밀 재촬영을 위한 중간 Z 높이 (mm)
 WRIST_OFFSET_DEFAULT =   0.0   # 손목 추가 회전 각도 (deg)
 HOME_X_SEARCH_ENABLE_DEFAULT = True
-HOME_X_SEARCH_STEP_M_DEFAULT = 0.300
+HOME_X_SEARCH_STEP_M_DEFAULT = 0.150
 
 # 정밀 재촬영 시, 대상 블록 중심에서 global y축 방향으로 이동할 거리.
 # 현재 기본값 +0.100m = global y축 +100mm 방향
@@ -352,6 +352,17 @@ class MasterNode(Node):
         self.get_logger().info("[END] robot1 end_joint 이동")
         return self.call(
             self.cli_r,
+            GetTargetPose.Request(target_size="END"),
+        )
+
+    def move_robot2_end(self):
+        """
+        robot_node.py에 정의된 robot2 end_joint로 이동한다.
+        조립 완료 후 robot2도 최종 대기 자세로 보내는 용도이다.
+        """
+        self.get_logger().info("[END] robot2 end_joint 이동")
+        return self.call(
+            self.cli_r2,
             GetTargetPose.Request(target_size="END"),
         )
 
@@ -1373,7 +1384,7 @@ class MasterNode(Node):
 
         if self.visual_insert(
             "2x2_red",
-            layer_index=0.7,
+            layer_index=0.6,
             release_gripper=False,
             base_pose=red_pose_0,
         ):
@@ -2192,6 +2203,7 @@ class MasterNode(Node):
         self.call(self.cli_g, SetBool.Request(data=False))
         time.sleep(self.WAIT_TIME)
         self.move_robot_end()
+        self.move_robot2_end()
 
         self.get_logger().info("ALL SEQUENCE DONE")
 

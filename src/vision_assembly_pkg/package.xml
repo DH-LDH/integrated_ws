@@ -4,7 +4,7 @@
   <name>vision_assembly_pkg</name>
   <version>0.0.0</version>
   <description>TODO: Package description</description>
-  <maintainer email="dsp_robotics@inu.ac.kr">orinagx</maintainer>
+  <maintainer email="jeho4557@gmail.com">orinagx</maintainer>
   <license>TODO: License declaration</license>
 
   <exec_depend>rclpy</exec_depend>
