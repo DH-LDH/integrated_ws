@@ -45,6 +45,21 @@ PRODUCE_FUNC = {
     46262: 'build_big_tree',
 }
 
+# product_id -> 완성체 드롭 관절 (S=소형, M=중형, L=대형)
+PRODUCE_DROP_TYPE = {
+    34:    'ASSEMBLY_DROP_S',   # 배터리
+    13:    'ASSEMBLY_DROP_S',   # 자석
+    81:    'ASSEMBLY_DROP_S',   # 비상정지
+    442:   'ASSEMBLY_DROP_M',   # 당근
+    241:   'ASSEMBLY_DROP_M',   # 신호등
+    462:   'ASSEMBLY_DROP_M',   # 작은나무
+    711:   'ASSEMBLY_DROP_M',   # 망치
+    4482:  'ASSEMBLY_DROP_L',   # 큰당근
+    8518:  'ASSEMBLY_DROP_M',   # 버거
+    48132: 'ASSEMBLY_DROP_L',   # 아이스크림
+    46262: 'ASSEMBLY_DROP_L',   # 큰나무
+}
+
 # product_id -> 분해(run_*_once) 함수 이름
 RECYCLE_FUNC = {
     34:    'run_battery_once',
@@ -164,6 +179,9 @@ class WbCommandNode(Node):
 
         a = self.assembler
         # 시작 상태 초기화 (master_node.run() 시작부와 동일): robot1 HOME + robot2 assembly_joint + 그리퍼 열기
+        a.assembly_completed = False
+        a.post_action_home_done = False
+
         home_res = a.call(a.cli_h, Trigger.Request())
         if home_res is None or not home_res.success:
             return False, 'ASSEMBLY_HOME_FAILED'
@@ -178,7 +196,13 @@ class WbCommandNode(Node):
         # 제품별 조립 시퀀스 실행
         getattr(a, func_name)()
 
-        # 마무리: HOME 복귀
+        # 완성체 내려놓기
+        if a.assembly_completed:
+            drop_type = PRODUCE_DROP_TYPE.get(product_id)
+            if drop_type:
+                a.drop_assembly(drop_type)
+
+        # 마무리: HOME 복귀 + 그리퍼 열기
         a.call(a.cli_h, Trigger.Request())
         time.sleep(1.0)
         a.call(a.cli_g, SetBool.Request(data=False))

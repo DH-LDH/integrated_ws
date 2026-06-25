@@ -157,6 +157,7 @@ class MasterNode(Node):
             ).value
         )
 
+        self.assembly_completed = False
         self.last_perfect_pose = None
         self.home_x_search_skip_z_classes = set()
         self.precision_scan_requests = {}
@@ -376,6 +377,31 @@ class MasterNode(Node):
             self.cli_r2,
             GetTargetPose.Request(target_size="ASSEMBLY_JOINT"),
         )
+
+    def drop_assembly(self, drop_target_size):
+        """
+        완성된 조립체를 지정된 관절 위치로 이동한 뒤 그리퍼를 열어 내려놓고 HOME으로 복귀한다.
+        drop_target_size: "ASSEMBLY_DROP_S" / "ASSEMBLY_DROP_M" / "ASSEMBLY_DROP_L"
+        """
+        self.get_logger().info(f"[ASSEMBLY DROP] {drop_target_size} 위치로 이동")
+        res = self.call(
+            self.cli_r,
+            GetTargetPose.Request(target_size=drop_target_size),
+        )
+        if res is None or not res.success:
+            self.get_logger().error(f"[ASSEMBLY DROP] {drop_target_size} 이동 실패")
+            return False
+        time.sleep(self.WAIT_TIME)
+
+        self.get_logger().info("[ASSEMBLY DROP] gripper open")
+        self.call(self.cli_g, SetBool.Request(data=False))
+        self.held_class = None
+        time.sleep(self.WAIT_TIME)
+
+        self.get_logger().info("[ASSEMBLY DROP] HOME 복귀")
+        self.call(self.cli_h, Trigger.Request())
+        time.sleep(self.WAIT_TIME)
+        return True
 
     def is_excluded_pose(self, pose, exclude_poses, tolerance_m=POSE_EXCLUSION_XY_TOLERANCE_M):
         if pose is None or not exclude_poses:
@@ -1263,6 +1289,7 @@ class MasterNode(Node):
         self.call(self.cli_h, Trigger.Request())
 
         if self.visual_insert("2x2_blue", layer_index=0.7):
+            self.assembly_completed = True
             self.get_logger().info("[완료] 배터리")
 
     def build_magnet(self):
@@ -1274,6 +1301,7 @@ class MasterNode(Node):
         self.call(self.cli_h, Trigger.Request())
 
         if self.visual_insert("2x2_red", layer_index=0.7):
+            self.assembly_completed = True
             self.get_logger().info("[완료] 자석")
 
     def build_e_stop(self):
@@ -1285,6 +1313,7 @@ class MasterNode(Node):
         self.call(self.cli_h, Trigger.Request())
 
         if self.visual_insert("4x2_yellow", layer_index=0.7, yaw_offset=0.0):
+            self.assembly_completed = True
             self.get_logger().info("[완료] 비상정지")
 
     def build_carrot(self):
@@ -1323,6 +1352,7 @@ class MasterNode(Node):
             layer_index=1.7,
             base_pose=yellow_pose_1,
         ):
+            self.assembly_completed = True
             self.get_logger().info("[완료] 당근")
 
     def build_traffic_light(self):
@@ -1343,6 +1373,7 @@ class MasterNode(Node):
         self.call(self.cli_h, Trigger.Request())
 
         if self.visual_insert("2x2_green", layer_index=1.7):
+            self.assembly_completed = True
             self.get_logger().info("[완료] 신호등")
 
     def build_small_tree(self):
@@ -1365,6 +1396,7 @@ class MasterNode(Node):
         self.call(self.cli_h, Trigger.Request())
 
         if self.visual_insert("2x2_yellow", layer_index=1.5):
+            self.assembly_completed = True
             self.get_logger().info("[완료] 작은 나무")
 
     def build_hammer(self):
@@ -1407,6 +1439,7 @@ class MasterNode(Node):
                 layer_index=1.5,
                 base_pose=red_pose_1,
             ):
+                self.assembly_completed = True
                 self.get_logger().info("[완료] 망치")
             return
 
@@ -1460,6 +1493,7 @@ class MasterNode(Node):
             release_gripper=False,
             base_pose=yellow_2x2_pose_1,
         ):
+            self.assembly_completed = True
             self.get_logger().info("[완료] 큰 당근")
 
     def build_burger(self):
@@ -1513,6 +1547,7 @@ class MasterNode(Node):
 
         self.get_logger().info("[Phase 4] 바닥 4x2_yellow에 최종 결합")
         if self.visual_insert("4x2_yellow", layer_index=1.4):
+            self.assembly_completed = True
             self.get_logger().info("[완료] 버거")
             return
 
@@ -1523,6 +1558,7 @@ class MasterNode(Node):
             saved_bottom_yellow_pose,
             layer_index=1.5,
         ):
+            self.assembly_completed = True
             self.get_logger().info("[완료] 버거 (저장 위치 fallback)")
             return
 
@@ -1793,6 +1829,7 @@ class MasterNode(Node):
             layer_index=2.5,
             release_gripper=True,
         ):
+            self.assembly_completed = True
             self.get_logger().info("[완료] 아이스크림")
             return
 
@@ -1806,6 +1843,7 @@ class MasterNode(Node):
             layer_index=2.5,
             release_gripper=True,
         ):
+            self.assembly_completed = True
             self.get_logger().info("[완료] 아이스크림 (저장 위치 fallback)")
             return
 
@@ -2070,6 +2108,7 @@ class MasterNode(Node):
             offset_studs_y=0.0,
             release_gripper=True,
         ):
+            self.assembly_completed = True
             self.get_logger().info("[완료] 큰 나무")
             return
 
@@ -2084,6 +2123,7 @@ class MasterNode(Node):
             offset_studs_y=0.0,
             release_gripper=True,
         ):
+            self.assembly_completed = True
             self.get_logger().info("[완료] 큰 나무 (저장 위치 fallback)")
             return
 
@@ -2156,6 +2196,21 @@ class MasterNode(Node):
             "큰나무":     self.build_big_tree,
         }
 
+        # 완성체 내려놓는 관절 위치: S=소형, M=중형, L=대형
+        assembly_drop_map = {
+            "1": "ASSEMBLY_DROP_S", "battery":    "ASSEMBLY_DROP_S", "배터리":     "ASSEMBLY_DROP_S",
+            "2": "ASSEMBLY_DROP_S", "magnet":     "ASSEMBLY_DROP_S", "자석":       "ASSEMBLY_DROP_S",
+            "3": "ASSEMBLY_DROP_S", "estop":      "ASSEMBLY_DROP_S", "비상정지":   "ASSEMBLY_DROP_S",
+            "4": "ASSEMBLY_DROP_M", "carrot":     "ASSEMBLY_DROP_M", "당근":       "ASSEMBLY_DROP_M",
+            "5": "ASSEMBLY_DROP_M", "traffic":    "ASSEMBLY_DROP_M", "신호등":     "ASSEMBLY_DROP_M",
+            "6": "ASSEMBLY_DROP_M", "tree":       "ASSEMBLY_DROP_M", "작은나무":   "ASSEMBLY_DROP_M",
+            "7": "ASSEMBLY_DROP_M", "hammer":     "ASSEMBLY_DROP_M", "망치":       "ASSEMBLY_DROP_M",
+            "8": "ASSEMBLY_DROP_L", "bigcarrot":  "ASSEMBLY_DROP_L", "큰당근":     "ASSEMBLY_DROP_L",
+            "9": "ASSEMBLY_DROP_M", "burger":     "ASSEMBLY_DROP_M", "버거":       "ASSEMBLY_DROP_M",
+            "10": "ASSEMBLY_DROP_L", "icecream":  "ASSEMBLY_DROP_L", "아이스크림": "ASSEMBLY_DROP_L",
+            "11": "ASSEMBLY_DROP_L", "big_tree":  "ASSEMBLY_DROP_L", "큰나무":     "ASSEMBLY_DROP_L",
+        }
+
         print("\n=== Master Node Assembly Keyboard Select ===")
         print("1: 배터리 / 2: 자석 / 3: 비상정지 / 4: 당근 / 5: 신호등 / 6: 작은나무")
         print("7: 망치 / 8: 큰당근 / 9: 버거 / 10: 아이스크림 / 11: 큰나무")
@@ -2180,6 +2235,7 @@ class MasterNode(Node):
 
             self.get_logger().info(f"작업 시작: {user_input}")
             self.post_action_home_done = False
+            self.assembly_completed = False
 
             action()
 
@@ -2193,6 +2249,15 @@ class MasterNode(Node):
                 )
                 self.call(self.cli_h, Trigger.Request())
                 time.sleep(1.0)
+
+            if self.assembly_completed:
+                drop_target_size = assembly_drop_map.get(user_input)
+                if drop_target_size:
+                    self.get_logger().info(
+                        f"[ASSEMBLY DROP] 완성체 내려놓기 시작: {drop_target_size}"
+                    )
+                    self.drop_assembly(drop_target_size)
+                    self.post_action_home_done = True
 
             self.get_logger().info("개별 조립 완료")
 

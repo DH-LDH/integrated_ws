@@ -245,7 +245,10 @@ ROBOT_CONFIGS = {
         "drop_joint2": [-100.03, 20.95, 72.05, 0.02, 87.00, -10.03],
         "drop_joint3": [-108.77, 25.01, 66.67, 0.02, 88.32, -18.76],
         "drop_joint4": [-79.86, 20.43, 72.73, 0.02, 86.85, 10.14],
-        "drop_joint5": [-70.49, 24.35, 67.56, 0.02, 88.09, 19.52]
+        "drop_joint5": [-70.49, 24.35, 67.56, 0.02, 88.09, 19.52],
+        "assembly_drop_joint_s": [-157.95, 0.71, 112.47, 61.43, 59.02, -188.06],
+        "assembly_drop_joint_m": [-157.95, -0.30, 111.25, 60.29, 60.10, -185.80],
+        "assembly_drop_joint_l": [-157.95, -0.71, 110.69, 59.81, 60.58, -184.84],
     },
     "robot2": {
         "ip": "10.0.2.8",
@@ -293,6 +296,9 @@ class DualRobotNode(Node):
                 "drop_joint3": np.array(cfg.get("drop_joint3", cfg.get("drop_joint", cfg["home_joint"])), dtype=float),
                 "drop_joint4": np.array(cfg.get("drop_joint4", cfg.get("drop_joint", cfg["home_joint"])), dtype=float),
                 "drop_joint5": np.array(cfg.get("drop_joint5", cfg.get("drop_joint", cfg["home_joint"])), dtype=float),
+                "assembly_drop_joint_s": np.array(cfg.get("assembly_drop_joint_s", cfg["home_joint"]), dtype=float),
+                "assembly_drop_joint_m": np.array(cfg.get("assembly_drop_joint_m", cfg["home_joint"]), dtype=float),
+                "assembly_drop_joint_l": np.array(cfg.get("assembly_drop_joint_l", cfg["home_joint"]), dtype=float),
                 "last_target": None,
             }
 
@@ -447,6 +453,18 @@ class DualRobotNode(Node):
             elif req.target_size == "ASSEMBLY_JOINT":
                 robot.move_j(rc, handle["assembly_joint"], 255, 255)
                 self.wait_move(robot_name, "ASSEMBLY_JOINT")
+
+            elif req.target_size == "ASSEMBLY_DROP_S":
+                robot.move_j(rc, handle["assembly_drop_joint_s"], 255, 255)
+                self.wait_move(robot_name, "ASSEMBLY_DROP_S")
+
+            elif req.target_size == "ASSEMBLY_DROP_M":
+                robot.move_j(rc, handle["assembly_drop_joint_m"], 255, 255)
+                self.wait_move(robot_name, "ASSEMBLY_DROP_M")
+
+            elif req.target_size == "ASSEMBLY_DROP_L":
+                robot.move_j(rc, handle["assembly_drop_joint_l"], 255, 255)
+                self.wait_move(robot_name, "ASSEMBLY_DROP_L")
 
             else:
                 self.get_logger().error(f"{robot_name} unknown target_size: {req.target_size}")
