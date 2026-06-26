@@ -17,7 +17,7 @@ import math
 Z_OFF_DEFAULT        = -100.0   # 카메라 Z → 로봇 툴 Z 변환 오프셋 (mm)
 Z_MARGIN_DEFAULT     =  22.0   # APPROACH 후 최종 하강 여유 거리 (mm)
 BLOCK_H_DEFAULT      =  19.0   # 듀플로/레고 블록 한 층 높이 (mm)
-WAIT_TIME_DEFAULT    =   1.5   # 모션 완료 후 대기 시간 (s)
+WAIT_TIME_DEFAULT    =   0.7 # 모션 완료 후 대기 시간 (s)
 PRE_XY_LOWER_DEFAULT = 80.0   # 정밀 재촬영을 위한 중간 Z 높이 (mm)
 WRIST_OFFSET_DEFAULT =   0.0   # 손목 추가 회전 각도 (deg)
 HOME_X_SEARCH_ENABLE_DEFAULT = True
@@ -32,7 +32,7 @@ NEGATIVE_X_SCAN_EXTRA_ENABLE_DEFAULT = True
 
 # pose.x < 0일 때 global x축 방향으로 추가 이동할 거리
 # -0.050m = global x축 -50mm 방향
-NEGATIVE_X_EXTRA_GLOBAL_X_OFFSET_DEFAULT = 0.030
+NEGATIVE_X_EXTRA_GLOBAL_X_OFFSET_DEFAULT = 0.050
 
 # 호환용 legacy 파라미터. 현재 조립 검증은 재촬영 이동이 아니라
 # decision_assembly block_count 감소로 판단한다.
@@ -441,7 +441,7 @@ class MasterNode(Node):
             self.get_logger().warn("[INIT] /scan_all_blocks 실패. 기존 인식 경로로 계속 진행합니다.")
             return False
 
-        time.sleep(0.5)
+        time.sleep(1.0)
 
         self.get_logger().info("[INIT] birdseye 위치 동결 요청: /lock_positions")
         lock_res = call_trigger_if_available(
@@ -937,7 +937,7 @@ class MasterNode(Node):
                     self.cli_r,
                     GetTargetPose.Request(z=self.PRE_XY_LOWER, target_size="Z"),
                 )
-                time.sleep(self.WAIT_TIME)
+                time.sleep(0.5)
 
             self.get_logger().info(
                 f"[PRECISION] XY 이동: x={scan_x:.4f}m, y={scan_y:.4f}m"
@@ -946,7 +946,7 @@ class MasterNode(Node):
                 self.cli_r,
                 GetTargetPose.Request(x=scan_x, y=scan_y, z=0.0, target_size="XY"),
             )
-            time.sleep(self.WAIT_TIME)
+            time.sleep(0.5)
 
             self.get_logger().info(
                 f"[PRECISION] 재촬영 요청: class={original_class_name}"
@@ -1015,7 +1015,7 @@ class MasterNode(Node):
                 target_size="APPROACH",
             ),
         )
-        time.sleep(self.WAIT_TIME)
+        time.sleep(0.5)
 
         if do_final_lower:
             # ------------------------------------------------------------- #
@@ -1032,7 +1032,7 @@ class MasterNode(Node):
                     target_size="Z",
                 ),
             )
-            time.sleep(self.WAIT_TIME)
+            time.sleep(0.5)
         else:
             self.get_logger().info(
                 "[LOWER] do_final_lower=False. APPROACH 후 추가 Z 하강을 생략합니다."
@@ -1084,7 +1084,7 @@ class MasterNode(Node):
         if home_res is None or not home_res.success:
             self.get_logger().error("[PICK][COUNT] 파지 전 HOME 이동 실패")
             return False
-        time.sleep(self.WAIT_TIME)
+        time.sleep(0.5)
 
         before_count = self.read_floor_count_at_home(f"{color} 파지 전")
         if before_count is None:
@@ -1092,7 +1092,6 @@ class MasterNode(Node):
 
         self.get_logger().info("[GRIPPER] ensure open before pick")
         self.call(self.cli_g, SetBool.Request(data=False))
-        time.sleep(self.WAIT_TIME)
         self.held_class = None
 
         p = self.find_target_with_retry(color, local_id=local_id)
@@ -1112,7 +1111,6 @@ class MasterNode(Node):
 
         self.get_logger().info("[GRIPPER] close")
         self.call(self.cli_g, SetBool.Request(data=True))
-        time.sleep(self.WAIT_TIME)
         self.held_class = str(color).strip()
 
         self.get_logger().info(
@@ -1491,11 +1489,6 @@ class MasterNode(Node):
     def build_carrot(self):
         self.get_logger().info("[당근] 초록(Pick) -> 노랑(그리퍼 유지) -> 노랑(Base)")
 
-        yellow_pose_0 = self.find_target_with_retry("2x2_yellow")
-        if not yellow_pose_0:
-            self.get_logger().warn("첫 번째 2x2_yellow 위치 저장 실패. 당근 조립 취소.")
-            return
-
         if not self.pick_target("2x2_green"):
             return
 
@@ -1505,24 +1498,18 @@ class MasterNode(Node):
             "2x2_yellow",
             layer_index=0.7,
             release_gripper=False,
-            base_pose=yellow_pose_0,
+            pre_khj_scan=True,
+            local_id=0,
         ):
             return
 
         self.call(self.cli_h, Trigger.Request())
 
-        yellow_pose_1 = self.find_target_with_retry(
-            "2x2_yellow",
-            exclude_poses=[yellow_pose_0],
-        )
-        if not yellow_pose_1:
-            self.get_logger().warn("남은 2x2_yellow 위치 분리 실패. 당근 조립 취소.")
-            return
-
         if self.visual_insert(
             "2x2_yellow",
             layer_index=1.7,
-            base_pose=yellow_pose_1,
+            pre_khj_scan=True,
+            local_id=1,
         ):
             self.assembly_completed = True
             self.get_logger().info("[완료] 당근")
@@ -1576,11 +1563,6 @@ class MasterNode(Node):
             "[망치] 파랑4x2(Pick) -> 빨강2x2(그리퍼 유지) -> 빨강2x2(Base)"
         )
 
-        red_pose_0 = self.find_target_with_retry("2x2_red")
-        if not red_pose_0:
-            self.get_logger().warn("첫 번째 2x2_red 위치 저장 실패. 망치 조립 취소.")
-            return
-
         if not self.pick_target("4x2_blue"):
             return
 
@@ -1588,9 +1570,10 @@ class MasterNode(Node):
 
         if self.visual_insert(
             "2x2_red",
-            layer_index=0.6,
+            layer_index=0.7,
             release_gripper=False,
-            base_pose=red_pose_0,
+            pre_khj_scan=True,
+            local_id=0,
         ):
             self.get_logger().info(
                 "[망치] 첫 번째 2x2_red 결합 검증 완료. 남은 2x2_red 결합 시퀀스로 진행합니다."
@@ -1598,18 +1581,11 @@ class MasterNode(Node):
 
             self.call(self.cli_h, Trigger.Request())
 
-            red_pose_1 = self.find_target_with_retry(
-                "2x2_red",
-                exclude_poses=[red_pose_0],
-            )
-            if not red_pose_1:
-                self.get_logger().warn("남은 2x2_red 위치 분리 실패. 망치 조립 취소.")
-                return
-
             if self.visual_insert(
                 "2x2_red",
-                layer_index=1.5,
-                base_pose=red_pose_1,
+                layer_index=1.6,
+                pre_khj_scan=True,
+                local_id=1,
             ):
                 self.assembly_completed = True
                 self.get_logger().info("[완료] 망치")
@@ -1621,11 +1597,6 @@ class MasterNode(Node):
         self.get_logger().info(
             "[큰 당근] 초록2x2(Pick) -> 노랑4x2 -> 노랑2x2 -> 노랑2x2(Base)"
         )
-
-        yellow_2x2_pose_0 = self.find_target_with_retry("2x2_yellow")
-        if not yellow_2x2_pose_0:
-            self.get_logger().warn("첫 번째 2x2_yellow 위치 저장 실패. 큰 당근 조립 취소.")
-            return
 
         if not self.pick_target("2x2_green"):
             return
@@ -1645,25 +1616,19 @@ class MasterNode(Node):
             "2x2_yellow",
             layer_index=1.5,
             release_gripper=False,
-            base_pose=yellow_2x2_pose_0,
+            pre_khj_scan=True,
+            local_id=0,
         ):
             return
 
         self.call(self.cli_h, Trigger.Request())
 
-        yellow_2x2_pose_1 = self.find_target_with_retry(
-            "2x2_yellow",
-            exclude_poses=[yellow_2x2_pose_0],
-        )
-        if not yellow_2x2_pose_1:
-            self.get_logger().warn("남은 2x2_yellow 위치 분리 실패. 큰 당근 조립 취소.")
-            return
-
         if self.visual_insert(
             "2x2_yellow",
             layer_index=2.5,
             release_gripper=False,
-            base_pose=yellow_2x2_pose_1,
+            pre_khj_scan=True,
+            local_id=1,
         ):
             self.assembly_completed = True
             self.get_logger().info("[완료] 큰 당근")
@@ -1682,7 +1647,7 @@ class MasterNode(Node):
 
         # Phase 간 HOME 복귀 + 바닥 블록 개수 확인 (다음 phase 기준값 갱신)
         self.call(self.cli_h, Trigger.Request())
-        time.sleep(self.WAIT_TIME)
+        time.sleep(0.3)
         self.current_floor_count_at_home = None  # visual_insert 시작 시 HOME에서 재취득
 
         self.get_logger().info(
@@ -1700,7 +1665,7 @@ class MasterNode(Node):
 
         # Phase 간 HOME 복귀 + 바닥 블록 개수 확인
         self.call(self.cli_h, Trigger.Request())
-        time.sleep(self.WAIT_TIME)
+        time.sleep(0.3)
         self.current_floor_count_at_home = None
 
         self.get_logger().info(
@@ -1718,7 +1683,7 @@ class MasterNode(Node):
 
         # Phase 간 HOME 복귀 + 바닥 블록 개수 확인
         self.call(self.cli_h, Trigger.Request())
-        time.sleep(self.WAIT_TIME)
+        time.sleep(0.3)
         self.current_floor_count_at_home = None
 
         self.get_logger().info(
@@ -1912,16 +1877,8 @@ class MasterNode(Node):
             "2x2_yellow 최종 결합"
         )
 
-        saved_bottom_yellow_pose = None
-        self.get_logger().info("[Phase 0] 최종 base용 2x2_yellow 위치 저장")
-        saved_bottom_yellow_pose = self.find_target_with_retry("2x2_yellow")
-        if not saved_bottom_yellow_pose:
-            self.get_logger().warn(
-                "2x2_yellow 위치 저장 실패. 최종 단계에서 메모리 fallback 없이 진행합니다."
-            )
-
         self.call(self.cli_h, Trigger.Request())
-        time.sleep(1.0)
+        time.sleep(0.3)
 
         self.get_logger().info("[Phase 1] 2x2_red 파지")
         if not self.pick_target("2x2_red"):
@@ -1929,7 +1886,7 @@ class MasterNode(Node):
             return
 
         self.call(self.cli_h, Trigger.Request())
-        time.sleep(1.0)
+        time.sleep(0.3)
 
         self.get_logger().info(
             "[Phase 2] 들고 있는 2x2_red -> 4x2_yellow 결합 "
@@ -1944,7 +1901,7 @@ class MasterNode(Node):
             return
 
         self.call(self.cli_h, Trigger.Request())
-        time.sleep(1.0)
+        time.sleep(0.3)
 
         self.get_logger().info("[Phase 3] 2x2_blue 파지")
         if not self.pick_target("2x2_blue"):
@@ -1952,7 +1909,7 @@ class MasterNode(Node):
             return
 
         self.call(self.cli_h, Trigger.Request())
-        time.sleep(1.0)
+        time.sleep(0.3)
 
         self.get_logger().info(
             "[Phase 4] 들고 있는 2x2_blue -> 2x2_red 옆에 결합 "
@@ -1967,7 +1924,7 @@ class MasterNode(Node):
             return
 
         self.call(self.cli_h, Trigger.Request())
-        time.sleep(1.0)
+        time.sleep(0.3)
 
         self.get_logger().info("[Phase 5] 2x2_green 파지")
         if not self.pick_target("2x2_green"):
@@ -1975,7 +1932,7 @@ class MasterNode(Node):
             return
 
         self.call(self.cli_h, Trigger.Request())
-        time.sleep(1.0)
+        time.sleep(0.3)
 
         self.get_logger().info(
             "[Phase 6] 들고 있는 2x2_green -> 2x2_blue 결합 "
@@ -1991,7 +1948,7 @@ class MasterNode(Node):
             return
 
         self.call(self.cli_h, Trigger.Request())
-        time.sleep(1.0)
+        time.sleep(0.3)
 
         self.get_logger().info("[Phase 7] 최종 결합: 현재 조립체 -> 2x2_yellow")
 
@@ -2004,21 +1961,7 @@ class MasterNode(Node):
             self.get_logger().info("[완료] 아이스크림")
             return
 
-        self.get_logger().warn(
-            "[Phase 7] 현재 시야에서 2x2_yellow 인식 실패. "
-            "저장한 위치로 fallback합니다."
-        )
-
-        if saved_bottom_yellow_pose and self.blind_insert(
-            saved_bottom_yellow_pose,
-            layer_index=2.5,
-            release_gripper=True,
-        ):
-            self.assembly_completed = True
-            self.get_logger().info("[완료] 아이스크림 (저장 위치 fallback)")
-            return
-
-        self.get_logger().warn("저장된 2x2_yellow 위치도 없어 아이스크림 최종 결합 실패.")
+        self.get_logger().warn("[Phase 7] 2x2_yellow 인식 실패. 아이스크림 최종 결합 실패.")
 
 
 
@@ -2116,36 +2059,8 @@ class MasterNode(Node):
         big_tree_2x2_green_offset_y = 2.0
         big_tree_final_yellow_offset_y = 0.0
 
-        saved_yellow_pose = None
-        green_4x2_pose_0 = None
-        green_4x2_pose_1 = None
-        green_2x2_pick_pose = None
-        green_2x2_base_pose = None
-
-        # ------------------------------------------------------------- #
-        # Phase 0. 최종 base인 2x2_yellow 위치를 미리 저장
-        #
-        # 조립체가 커진 뒤에는 그리퍼/블록 때문에 2x2_yellow가
-        # 카메라에서 가려질 수 있으므로, 버거처럼 최종 base 위치를
-        # 먼저 저장해 둔다.
-        # ------------------------------------------------------------- #
-        self.get_logger().info("[Phase 0] 최종 base용 2x2_yellow 위치 저장")
-        saved_yellow_pose = self.find_target_with_retry("2x2_yellow")
-
-        if not saved_yellow_pose:
-            self.get_logger().warn(
-                "2x2_yellow 위치 저장 실패. 최종 단계에서 메모리 fallback 없이 진행합니다."
-            )
-
-        self.get_logger().info("[Phase 0-2] 같은 색 반복 대상 pose 분리 저장")
-        green_4x2_pose_0 = self.find_target_with_retry("4x2_green")
-        green_2x2_pick_pose = self.find_target_with_retry("2x2_green")
-        if not (green_4x2_pose_0 and green_2x2_pick_pose):
-            self.get_logger().warn("큰 나무 초기 같은 색 블럭 pose 저장 실패. 조립 취소.")
-            return
-
         self.call(self.cli_h, Trigger.Request())
-        time.sleep(1.0)
+        time.sleep(0.3)
 
         # ------------------------------------------------------------- #
         # Phase 1. 가장 윗층이 될 2x2_green 파지
@@ -2160,15 +2075,7 @@ class MasterNode(Node):
             return
 
         self.call(self.cli_h, Trigger.Request())
-        time.sleep(1.0)
-
-        green_4x2_pose_1 = self.find_target_with_retry(
-            "4x2_green",
-            exclude_poses=[green_4x2_pose_0],
-        )
-        if not green_4x2_pose_1:
-            self.get_logger().warn("남은 4x2_green 위치 분리 실패. 큰 나무 조립 취소.")
-            return
+        time.sleep(0.3)
 
         # ------------------------------------------------------------- #
         # Phase 2. 들고 있는 2x2_green을 4x2_green 위에 결합
@@ -2189,13 +2096,14 @@ class MasterNode(Node):
             layer_index=0.7,
             offset_studs_y=0.0,
             release_gripper=False,
-            base_pose=green_4x2_pose_0,
+            pre_khj_scan=True,
+            local_id=0,
         ):
             self.get_logger().warn("첫 번째 4x2_green 인식/결합 실패. 큰 나무 조립 취소.")
             return
 
         self.call(self.cli_h, Trigger.Request())
-        time.sleep(1.0)
+        time.sleep(0.3)
 
         # ------------------------------------------------------------- #
         # Phase 3. 현재 조립체를 다른 4x2_green 위에 offset 적용해서 결합
@@ -2215,21 +2123,14 @@ class MasterNode(Node):
             layer_index=1.7,
             offset_studs_y=-1.0,
             release_gripper=False,
-            base_pose=green_4x2_pose_1,
+            pre_khj_scan=True,
+            local_id=1,
         ):
             self.get_logger().warn("두 번째 4x2_green 인식/결합 실패. 큰 나무 조립 취소.")
             return
 
         self.call(self.cli_h, Trigger.Request())
-        time.sleep(1.0)
-
-        green_2x2_base_pose = self.find_target_with_retry(
-            "2x2_green",
-            exclude_poses=[green_2x2_pick_pose],
-        )
-        if not green_2x2_base_pose:
-            self.get_logger().warn("남은 2x2_green 위치 분리 실패. 큰 나무 조립 취소.")
-            return
+        time.sleep(0.3)
 
         # ------------------------------------------------------------- #
         # Phase 4. 현재 조립체를 2x2_green 위에 offset 적용해서 결합
@@ -2250,13 +2151,14 @@ class MasterNode(Node):
             layer_index=1.7,
             offset_studs_y=2.0,
             release_gripper=False,
-            base_pose=green_2x2_base_pose,
+            pre_khj_scan=True,
+            local_id=1,
         ):
             self.get_logger().warn("2x2_green 인식/결합 실패. 큰 나무 조립 취소.")
             return
 
         self.call(self.cli_h, Trigger.Request())
-        time.sleep(1.0)
+        time.sleep(0.3)
 
         # ------------------------------------------------------------- #
         # Phase 5. 최종 결합: 현재 들고 있는 전체 조립체를 2x2_yellow 위에 결합
@@ -2283,22 +2185,7 @@ class MasterNode(Node):
             self.get_logger().info("[완료] 큰 나무")
             return
 
-        self.get_logger().warn(
-            "[Phase 5] 현재 시야에서 2x2_yellow 인식 실패. "
-            "저장한 위치로 fallback합니다."
-        )
-
-        if saved_yellow_pose and self.blind_insert(
-            saved_yellow_pose,
-            layer_index=2.4,
-            offset_studs_y=0.0,
-            release_gripper=True,
-        ):
-            self.assembly_completed = True
-            self.get_logger().info("[완료] 큰 나무 (저장 위치 fallback)")
-            return
-
-        self.get_logger().warn("저장된 2x2_yellow 위치도 없어 큰 나무 최종 결합 실패.")
+        self.get_logger().warn("[Phase 5] 2x2_yellow 인식 실패. 큰 나무 최종 결합 실패.")
 
     # ------------------------------------------------------------------ #
     # 메인 루프
@@ -2307,19 +2194,29 @@ class MasterNode(Node):
     def run(self):
         self.get_logger().info("STARTING ASSEMBLY SEQUENCE (Keyboard Select Mode)")
 
-        home_res = self.call(self.cli_h, Trigger.Request())
+        self.get_logger().info("[INIT] HOME / robot2 assembly_joint / gripper open 동시 시작")
+        for cli in (self.cli_h, self.cli_r2, self.cli_g):
+            while not cli.wait_for_service(timeout_sec=1.0):
+                self.get_logger().info(f"Waiting for {cli.srv_name}...")
+
+        future_h  = self.cli_h.call_async(Trigger.Request())
+        future_r2 = self.cli_r2.call_async(GetTargetPose.Request(target_size="ASSEMBLY_JOINT"))
+        future_g  = self.cli_g.call_async(SetBool.Request(data=False))
+
+        rclpy.spin_until_future_complete(self, future_h)
+        rclpy.spin_until_future_complete(self, future_r2)
+        rclpy.spin_until_future_complete(self, future_g)
+
+        home_res     = future_h.result()
+        assembly_res = future_r2.result()
+
         if home_res is None or not home_res.success:
             self.get_logger().error("시작 HOME 이동 실패. 조립을 시작하지 않습니다.")
             return
-
-        assembly_res = self.move_robot2_assembly_joint()
         if assembly_res is None or not assembly_res.success:
             self.get_logger().error("robot2 assembly_joint 이동 실패. 조립을 시작하지 않습니다.")
             return
-
-        self.get_logger().info("[INIT] gripper open")
-        self.call(self.cli_g, SetBool.Request(data=False))
-        time.sleep(1.0)
+        self.get_logger().info("[INIT] 초기화 완료")
 
         actions = {
             "1":          self.build_battery,

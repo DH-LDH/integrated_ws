@@ -1,225 +1,135 @@
-# import rclpy
-# from rclpy.node import Node
-# from std_srvs.srv import SetBool
-# import serial
-# import time
-
-# class GripperNode(Node):
-#     def __init__(self):
-#         super().__init__('gripper_node')
-#         self.srv = self.create_service(SetBool, 'control_gripper', self.control_cb)
-        
-#         try:
-#             # 시리얼 포트 연결 (노트북 설정에 맞춰 ACM0 또는 ACM1 확인 필요)
-#             self.ser = serial.Serial("/dev/ttyACM0", 115200, timeout=1)
-            
-#             # 아두이노/그리퍼 컨트롤러 리셋 대기
-#             time.sleep(2.0)
-#             self.get_logger().info("✅ Gripper Serial Connected")
-
-#             # [수정 사항] 노드 시작 시 자동으로 그리퍼를 엽니다.
-#             self.get_logger().info("➡️ Initializing Gripper: Sending 'open'...")
-#             self.ser.write(b"open\n")
-            
-#         except Exception as e:
-#             self.get_logger().error(f"❌ Serial Error: {e}")
-
-#     def control_cb(self, request, response):
-#         """
-#         Service Callback
-#         request.data 가 True면 grip, False면 open 명령을 보냅니다.
-#         """
-#         try:
-#             if request.data:  # True -> Grip
-#                 self.ser.write(b"grip\n")
-#                 self.get_logger().info("📌 Sent: grip")
-#                 response.message = "Grip Command Sent"
-#             else:             # False -> Open
-#                 self.ser.write(b"open\n")
-#                 self.get_logger().info("📌 Sent: open")
-#                 response.message = "Open Command Sent"
-            
-#             response.success = True
-#         except Exception as e:
-#             self.get_logger().error(f"❌ Service Error: {e}")
-#             response.success = False
-#             response.message = str(e)
-            
-#         return response
-
-# def main(args=None):
-#     rclpy.init(args=args)
-#     node = GripperNode()
-#     try:
-#         rclpy.spin(node)
-#     except KeyboardInterrupt:
-#         node.get_logger().info('Keyboard Interrupt (SIGINT)')
-#     finally:
-#         if hasattr(node, 'ser') and node.ser.is_open:
-#             node.ser.close()
-#             node.get_logger().info("✅ Serial Closed")
-#         node.destroy_node()
-#         rclpy.shutdown()
-
-# if __name__ == "__main__":
-#     main()
-
-# import rclpy
-# from rclpy.node import Node
-# from std_srvs.srv import SetBool
-# import serial
-# import time
-
-# class GripperNode(Node):
-#     def __init__(self):
-#         super().__init__('gripper_node')
-#         self.srv = self.create_service(SetBool, 'control_gripper', self.control_cb)
-        
-#         try:
-#             # 시리얼 포트 연결 (노트북 설정에 맞춰 ACM0 또는 ACM1 확인 필요)
-#             self.ser = serial.Serial("/dev/ttyACM0", 115200, timeout=1)
-            
-#             # 아두이노/그리퍼 컨트롤러 리셋 대기
-#             time.sleep(2.0)
-#             self.get_logger().info("✅ Gripper Serial Connected")
-
-#             # [수정 사항] 노드 시작 시 자동으로 그리퍼를 엽니다.
-#             self.get_logger().info("➡️ Initializing Gripper: Sending 'open'...")
-#             self.ser.write(b"open\n")
-            
-#         except Exception as e:
-#             self.get_logger().error(f"❌ Serial Error: {e}")
-
-#     def control_cb(self, request, response):
-#         """
-#         Service Callback
-#         request.data 가 True면 grip, False면 open 명령을 보냅니다.
-#         """
-#         try:
-#             if request.data:  # True -> Grip
-#                 self.ser.write(b"grip\n")
-#                 self.get_logger().info("📌 Sent: grip")
-#                 response.message = "Grip Command Sent"
-#             else:             # False -> Open
-#                 self.ser.write(b"open\n")
-#                 self.get_logger().info("📌 Sent: open")
-#                 response.message = "Open Command Sent"
-            
-#             response.success = True
-#         except Exception as e:
-#             self.get_logger().error(f"❌ Service Error: {e}")
-#             response.success = False
-#             response.message = str(e)
-            
-#         return response
-
-# def main(args=None):
-#     rclpy.init(args=args)
-#     node = GripperNode()
-#     try:
-#         rclpy.spin(node)
-#     except KeyboardInterrupt:
-#         node.get_logger().info('Keyboard Interrupt (SIGINT)')
-#     finally:
-#         if hasattr(node, 'ser') and node.ser.is_open:
-#             node.ser.close()
-#             node.get_logger().info("✅ Serial Closed")
-#         node.destroy_node()
-#         rclpy.shutdown()
-
-# if __name__ == "__main__":
-#     main()
-
-
 import rclpy
 from rclpy.node import Node
 from std_srvs.srv import SetBool
 import serial
 import time
-
-import threading  # [새로 추가된 모듈] 백그라운드 키보드 입력을 위해 사용
+import threading
 
 
 class GripperNode(Node):
     def __init__(self):
         super().__init__('gripper_node')
         self.srv = self.create_service(SetBool, 'control_gripper', self.control_cb)
-        
-        try:
-            # 시리얼 포트 연결 (노트북 설정에 맞춰 ACM0 또는 ACM1 확인 필요)
-            self.ser = serial.Serial("/dev/ttyACM0", 115200, timeout=1)
-            
-            # 아두이노/그리퍼 컨트롤러 리셋 대기
-            time.sleep(2.0)
-            self.get_logger().info("✅ Gripper Serial Connected")
+        self._serial_lock = threading.Lock()
 
-            # [수정 사항] 노드 시작 시 자동으로 그리퍼를 엽니다.
-            self.get_logger().info("➡️ Initializing Gripper: Sending 'open'...")
-            self.ser.write(b"open\n")
-            
+        try:
+            # timeout=0.5: readline 한 번당 최대 대기. 실제 완료 판정은 _wait_for_result에서 함
+            self.ser = serial.Serial("/dev/ttyACM0", 115200, timeout=0.5)
+            self.get_logger().info("✅ Gripper Serial Connected. 초기 open 확인 중...")
+
+            # Case 1: 시리얼 연결 시 Arduino가 리셋되면 setup()에서 자동 open → [OPEN] 출력
+            result = self._wait_for_result("[OPEN]", None, total_timeout_s=5.0)
+            if result:
+                self.get_logger().info("✅ 부팅 자동 open 완료.")
+            else:
+                # Case 2: Arduino가 이미 실행 중(리셋 없음) → 명시적 open 전송
+                self.get_logger().info("⚠️ 부팅 auto-open 없음. 명시적 open 전송...")
+                self.ser.reset_input_buffer()
+                self.ser.write(b"open\n")
+                result2 = self._wait_for_result("[OPEN]", None, total_timeout_s=4.0)
+                if result2:
+                    self.get_logger().info("✅ 명시적 open 완료.")
+                else:
+                    self.get_logger().warn("⚠️ open 응답 없음. 계속 진행합니다.")
+
+            self._kb_thread = threading.Thread(target=self._keyboard_loop, daemon=True)
+            self._kb_thread.start()
+
         except Exception as e:
             self.get_logger().error(f"❌ Serial Error: {e}")
 
+    def _wait_for_result(self, success_kw, fail_kw, total_timeout_s):
+        """
+        Arduino 응답 라인을 읽어가며 키워드가 포함된 라인을 찾는다.
+          success_kw 발견 → True
+          fail_kw 발견    → False
+          전체 타임아웃    → None
+        호출자가 _serial_lock을 보유한 상태에서 호출한다.
+        """
+        deadline = time.monotonic() + total_timeout_s
+        while time.monotonic() < deadline:
+            line = self.ser.readline().decode(errors='ignore').strip()
+            if line:
+                self.get_logger().info(f"[ARDUINO] {line}")
+            if success_kw and success_kw in line:
+                return True
+            if fail_kw and fail_kw in line:
+                return False
+        return None
 
-        # ---- [새로 추가된 부분: 키보드 입력을 처리하는 별도 스레드 시작] ----
-        self.input_thread = threading.Thread(target=self.keyboard_input_loop, daemon=True)
-        self.input_thread.start()
-        # ----------------------------------------------------------------------
-
-    # ---- [새로 추가된 부분: 키보드 입력 처리 함수] ----
-    def keyboard_input_loop(self):
-        # 노드가 살아있는 동안 계속 반복
+    def _keyboard_loop(self):
         while rclpy.ok():
             try:
-                # 사용자가 터미널에 입력한 글자를 가져와서 소문자로 변환하고 공백 제거
-                user_cmd = input("\n터미널 명령 입력 (grip / open): ").strip().lower()
-                
-                if user_cmd == "grip":
-                    if hasattr(self, 'ser') and self.ser.is_open:
-                        self.ser.write(b"grip\n")
-                        self.get_logger().info("⌨️ Keyboard Command Sent: grip")
-                    else:
-                        print("시리얼이 연결되지 않았습니다.")
-                        
-                elif user_cmd == "open":
-                    if hasattr(self, 'ser') and self.ser.is_open:
-                        self.ser.write(b"open\n")
-                        self.get_logger().info("⌨️ Keyboard Command Sent: open")
-                    else:
-                        print("시리얼이 연결되지 않았습니다.")
-                        
-                elif user_cmd in ("q", "quit", "exit", "종료"):
-                    self.get_logger().info("키보드 입력 모드를 종료합니다.")
+                cmd = input("\n그리퍼 명령 (grip / open / q): ").strip().lower()
+                if not cmd:
+                    continue
+                if cmd in ("q", "quit", "exit"):
                     break
-                else:
-                    if user_cmd:    
-                        print("잘못된 입력입니다. 'grip' 또는 'open'만 입력해주세요.")
+                if cmd not in ("grip", "open"):
+                    print("grip 또는 open만 입력하세요.")
+                    continue
+
+                with self._serial_lock:
+                    if cmd == "grip":
+                        self.ser.write(b"grip\n")
+                        self.get_logger().info("⌨️ Keyboard: grip 전송")
+                        result = self._wait_for_result("Torque remains ON", "Failed", 5.0)
+                        if result is True:
+                            self.get_logger().info("⌨️ Grip SUCCESS")
+                        elif result is False:
+                            self.get_logger().warn("⌨️ Grip FAIL. 열리는 중...")
+                            self._wait_for_result("[OPEN]", None, 4.0)
+                        else:
+                            self.get_logger().warn("⌨️ Grip: Arduino 응답 없음")
+                    else:
+                        self.ser.write(b"open\n")
+                        self.get_logger().info("⌨️ Keyboard: open 전송")
+                        self._wait_for_result("[OPEN]", None, 4.0)
+
             except EOFError:
                 break
             except Exception as e:
                 self.get_logger().error(f"Keyboard loop error: {e}")
                 break
-    # ----------------------------------------------------------------------
 
     def control_cb(self, request, response):
-       
         try:
-            if request.data:  # True -> Grip
-                self.ser.write(b"grip\n")
-                self.get_logger().info("📌 Sent: grip")
-                response.message = "Grip Command Sent"
-            else:             # False -> Open
-                self.ser.write(b"open\n")
-                self.get_logger().info("📌 Sent: open")
-                response.message = "Open Command Sent"
-            
-            response.success = True
+            with self._serial_lock:
+                if request.data:  # True -> Grip
+                    self.ser.write(b"grip\n")
+                    self.get_logger().info("📌 Sent: grip — Arduino 파지 완료 신호 대기 중...")
+
+                    result = self._wait_for_result("Torque remains ON", "Failed", 5.0)
+
+                    if result is True:
+                        self.get_logger().info("📌 Grip SUCCESS")
+                        response.success = True
+                        response.message = "Gripped"
+                    elif result is False:
+                        self.get_logger().warn("📌 Grip FAIL: 물체 없음 또는 타임아웃. 그리퍼 열리는 중...")
+                        self._wait_for_result("[OPEN]", None, 4.0)
+                        response.success = False
+                        response.message = "Grip failed (no object or timeout)"
+                    else:
+                        self.get_logger().warn("📌 Grip: Arduino 응답 타임아웃. 파지 완료로 간주합니다.")
+                        response.success = True
+                        response.message = "Gripped (no ACK fallback)"
+
+                else:  # False -> Open
+                    self.ser.write(b"open\n")
+                    self.get_logger().info("📌 Sent: open — Arduino 완료 신호 대기 중...")
+
+                    result = self._wait_for_result("[OPEN]", None, 4.0)
+                    response.success = True
+                    response.message = "Opened" if result else "Opened (no ACK fallback)"
+
         except Exception as e:
             self.get_logger().error(f"❌ Service Error: {e}")
             response.success = False
             response.message = str(e)
-            
+
         return response
+
 
 def main(args=None):
     rclpy.init(args=args)
@@ -234,6 +144,7 @@ def main(args=None):
             node.get_logger().info("✅ Serial Closed")
         node.destroy_node()
         rclpy.shutdown()
+
 
 if __name__ == "__main__":
     main()

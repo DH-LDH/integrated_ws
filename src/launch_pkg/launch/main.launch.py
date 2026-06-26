@@ -21,8 +21,9 @@ def generate_launch_description():
     run_vision_node = LaunchConfiguration('run_vision_node')
     run_decision_assembly_camera = LaunchConfiguration('run_decision_assembly_camera')
 
-    # command_node는 키보드 입력 때문에 xterm 권장
+    # command_node / gripper_node는 키보드 입력 때문에 xterm 권장
     use_xterm_for_command = LaunchConfiguration('use_xterm_for_command')
+    use_xterm_for_gripper = LaunchConfiguration('use_xterm_for_gripper')
 
     return LaunchDescription([
 
@@ -38,7 +39,7 @@ def generate_launch_description():
 
         DeclareLaunchArgument(
             'run_command_node',
-            default_value='false',
+            default_value='true',
             description='Run control_pkg command_node'
         ),
 
@@ -86,6 +87,12 @@ def generate_launch_description():
             description='Run command_node in xterm'
         ),
 
+        DeclareLaunchArgument(
+            'use_xterm_for_gripper',
+            default_value='true',
+            description='Run gripper_node in xterm'
+        ),
+
         # =========================
         # Robot Node
         # =========================
@@ -127,13 +134,35 @@ def generate_launch_description():
         # Gripper Nodes
         # =========================
 
+        # gripper_node (xterm 없이)
         Node(
             package='hardware_pkg',
             executable='gripper_node',
             name='gripper_node',
             output='screen',
             emulate_tty=True,
-            condition=IfCondition(run_gripper_node),
+            condition=IfCondition(
+                PythonExpression([
+                    "'", run_gripper_node, "' == 'true' and '",
+                    use_xterm_for_gripper, "' != 'true'",
+                ])
+            ),
+        ),
+
+        # gripper_node (xterm)
+        Node(
+            package='hardware_pkg',
+            executable='gripper_node',
+            name='gripper_node',
+            output='screen',
+            emulate_tty=True,
+            prefix='xterm -hold -e',
+            condition=IfCondition(
+                PythonExpression([
+                    "'", run_gripper_node, "' == 'true' and '",
+                    use_xterm_for_gripper, "' == 'true'",
+                ])
+            ),
         ),
 
         Node(
