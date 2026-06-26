@@ -193,6 +193,9 @@ class WbCommandNode(Node):
         a.call(a.cli_g, SetBool.Request(data=False))
         time.sleep(1.0)
 
+        # 조립 시작 전: 로봇1&2 HOME 정렬 완료 후 전체 블록 스캔 + birdseye 동결
+        a.scan_all_blocks_at_home()
+
         # 제품별 조립 시퀀스 실행
         getattr(a, func_name)()
 
@@ -248,62 +251,64 @@ class WbCommandNode(Node):
     # ──────────────────────────────────────────────────────
     def keyboard_loop(self):
         print("\n[WB Command Keyboard]")
-        print("  home / h        : robot1 HOME")
-        print("  end / e         : robot1 END")
-        print("  home2 / h2      : robot2 HOME")
-        print("  end2 / e2       : robot2 END")
-        print("  assembly_joint / aj : robot2 ASSEMBLY_JOINT")
-        print("  home_all / ha   : both HOME")
-        print("  end_all / ea    : both END")
-        print("  quit / q        : shutdown command node")
+        print("  home / h             : robot1 HOME")
+        print("  end / e              : robot1 END")
+        print("  home2 / h2           : robot2 HOME")
+        print("  end2 / e2            : robot2 END")
+        print("  assembly_joint / aj  : robot2 ASSEMBLY_JOINT")
+        print("  home_all / ha        : both HOME")
+        print("  end_all / ea         : both END")
+        print("  quit / q             : shutdown command node")
 
         while rclpy.ok():
             try:
-                command = input("wb-command> ").strip().lower()
+                command = input("wb-command> ").strip()
             except EOFError:
                 return
 
             if not command:
                 continue
 
+            cmd_lower = command.lower()
+
             try:
                 with self.command_lock:
-                    if command in ("home", "h"):
+                    if cmd_lower in ("home", "h"):
                         self.get_logger().info("[KEYBOARD] robot1 HOME")
                         self.assembler.call(
                             self.assembler.cli_h,
                             Trigger.Request(),
                         )
-                    elif command in ("end", "e"):
+                    elif cmd_lower in ("end", "e"):
                         self.get_logger().info("[KEYBOARD] robot1 END")
                         self.assembler.move_robot_end()
-                    elif command in ("home2", "h2"):
+                    elif cmd_lower in ("home2", "h2"):
                         self.get_logger().info("[KEYBOARD] robot2 HOME")
                         self.disassembler.call(
                             self.disassembler.cli_h2,
                             Trigger.Request(),
                         )
-                    elif command in ("end2", "e2"):
+                    elif cmd_lower in ("end2", "e2"):
                         self.get_logger().info("[KEYBOARD] robot2 END")
                         self.disassembler.send_pose(
                             self.disassembler.cli_r2,
                             "END",
                         )
-                    elif command in ("assembly_joint", "assembly", "aj"):
+                    elif cmd_lower in ("assembly_joint", "assembly", "aj"):
                         self.get_logger().info("[KEYBOARD] robot2 ASSEMBLY_JOINT")
                         self.assembler.move_robot2_assembly_joint()
-                    elif command in ("home_all", "homeall", "ha"):
+                    elif cmd_lower in ("home_all", "homeall", "ha"):
                         self.get_logger().info("[KEYBOARD] both HOME")
                         self.disassembler.move_both_home_pose()
-                    elif command in ("end_all", "endall", "ea"):
+                    elif cmd_lower in ("end_all", "endall", "ea"):
                         self.get_logger().info("[KEYBOARD] both END")
                         self.disassembler.move_both_end_pose()
-                    elif command in ("quit", "exit", "q", "종료"):
+                    elif cmd_lower in ("quit", "exit", "q", "종료"):
                         self.get_logger().info("[KEYBOARD] shutdown requested")
                         rclpy.shutdown()
                         return
                     else:
-                        print("Use: home/end/home2/end2/assembly_joint/home_all/end_all/quit")
+                        print("Use: home/end/home2/end2/aj/ha/ea  또는  quit")
             except Exception as e:
                 self.get_logger().error(f"[KEYBOARD] command failed: {e}")
 

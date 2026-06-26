@@ -59,6 +59,7 @@ def generate_launch_description():
             DeclareLaunchArgument("camera_name", default_value="camera"),
             DeclareLaunchArgument("camera_namespace", default_value="camera"),
             DeclareLaunchArgument("serial_no", default_value="_243522075311"),
+            realsense_launch,
             DeclareLaunchArgument(
                 "image_topic",
                 default_value="/camera/camera/color/image_raw",
@@ -69,7 +70,6 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument("method", default_value="cv"),
             DeclareLaunchArgument("depth_combine_mode", default_value="filter"),
-            realsense_launch,
             decision_assembly,
         ]
     )

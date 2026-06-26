@@ -256,7 +256,7 @@ ROBOT_CONFIGS = {
         "cam_y_off": 51.0, 
         "home_joint": [-90.0, -94.0, 147.7, 0.0, 35.6, 0.0],
         "end_joint": [-90.0, -94.0, 147.7, 0.0, -50.0, 0.0],
-        "assembly_joint": [-88.74, -74.71, 113.92, -12.45, 8.29, 190.38],
+        "assembly_joint": [-90, -73.29, 120.58, 0, 0, 180],
         # 👇 추가된 중간 경유지 (Waypoint)
         "separation_waypoint": [-90.0, 0.0, 120.0, 0.0, -30.0, 0.0], 
         "separation_joint": [-90.0, -9.73, 112.34, 0.0, -14.06, 0.0],
@@ -377,6 +377,10 @@ class DualRobotNode(Node):
                 dx = -(req.x * 1000.0) + handle["cam_y_off"]
                 dy = (req.y * 1000.0) + handle["cam_x_off"]
                 pose = np.array([dy, dx, 0, 0, 0, 0], dtype=float)
+                self.get_logger().info(
+                    f"[{robot_name}][XY] req=(x={req.x*1000:.1f}mm, y={req.y*1000:.1f}mm) "
+                    f"→ Tool(X={dy:.1f}mm, Y={dx:.1f}mm)"
+                )
                 robot.move_l_rel(rc, pose, self.L_VEL, self.L_ACC, rb.ReferenceFrame.Tool)
                 self.wait_move(robot_name, "XY")
 
@@ -392,6 +396,11 @@ class DualRobotNode(Node):
                 dx = -(req.x * 1000.0) + handle["cam_y_off"]
                 dy = (req.y * 1000.0) + handle["cam_x_off"]
                 pose = np.array([dy, dx, req.z, 0, 0, req.yaw], dtype=float)
+                self.get_logger().info(
+                    f"[{robot_name}][APPROACH] req=(x={req.x*1000:.1f}mm, y={req.y*1000:.1f}mm, "
+                    f"z={req.z:.1f}mm, yaw={req.yaw:.1f}°) "
+                    f"→ Tool(X={dy:.1f}mm, Y={dx:.1f}mm, Z={req.z:.1f}mm)"
+                )
                 robot.move_l_rel(rc, pose, self.L_VEL, self.L_ACC, rb.ReferenceFrame.Tool)
                 self.wait_move(robot_name, f"APPROACH(yaw={req.yaw:.1f})")
 

@@ -2,7 +2,7 @@ import argparse
 import json
 import os
 import time
-from collections import Counter
+from collections import Counter, deque
 
 import cv2
 import numpy as np
@@ -30,10 +30,13 @@ DEBUG_COUNT_TOPIC = "/decision_assembly/block_count"
 DEBUG_SUMMARY_TOPIC = "/decision_assembly/summary"
 
 # ROI polygon: 좌상 → 우상 → 우하 → 좌하 순서
-DEBUG_ROI_POLYGON = [254, 23, 475, 16, 640, 480, 150, 480]
+DEBUG_ROI_POLYGON = [234, 0, 478, 0, 640, 480, 90, 480]
 
 # CV blob 필터
 DEBUG_CV_MIN_AREA = 600.0
+
+# 위치별 블럭 1개 기준 면적 대비 이 비율보다 작으면 잡음으로 본다.
+DEBUG_CV_MIN_AREA_RATIO = 0.25
 
 # 0이면 고정 최대값 제한 비활성화
 # 이 값은 "절대 이 이상은 무조건 버림" 용도
@@ -82,7 +85,12 @@ DEBUG_DEPTH_RESIZE_IF_NEEDED = True
 # or    : RGB 또는 depth 중 하나라도 잡히면 검출. 민감하지만 오검출 가능.
 DEBUG_DEPTH_COMBINE_MODE = "filter"
 DEBUG_DEPTH_FILTER_MIN_VALID_RATIO = 0.20
-DEBUG_DEPTH_FILTER_MIN_OBJECT_RATIO = 0.02
+DEBUG_DEPTH_FILTER_MIN_OBJECT_RATIO = 0.08
+
+# ROI 경계 내부 여백 (픽셀)
+# 검출 영역을 ROI 경계에서 이 픽셀만큼 안쪽으로 축소한다.
+# Canny 가 ROI 폴리곤 경계를 엣지로 잡는 아티팩트를 차단한다.
+DEBUG_ROI_INNER_MARGIN = 8
 
 # 붙은 blob 분리
 DEBUG_CV_WATERSHED = True
@@ -94,6 +102,10 @@ DEBUG_CV_SPLIT_MIN_AREA_RATIO = 0.70
 DEBUG_YOLO_CONF = 0.5
 DEBUG_YOLO_IOU = 0.45
 DEBUG_YOLO_DEVICE = "0"
+
+# 카운트 안정화 rolling 윈도우 크기 (1=비활성화)
+# 최근 N 프레임의 중앙값을 발행해 모서리 노이즈로 인한 ±1 깜빡임을 제거한다.
+DEBUG_COUNT_SMOOTH_N = 5
 
 # 실행 / 표시
 DEBUG_METHOD = "cv"
@@ -580,12 +592,53 @@ def contour_depth_stats(contour, depth_valid_mask, depth_object_mask):
     }
 
 
+def detection_quality(det):
+    area = float(det.get("count_area", det.get("area", 0.0)))
+    single_area = max(1.0, float(det.get("single_area", 1.0)))
+    return (
+        float(area / single_area),
+        float(det.get("area", 0.0)),
+    )
+
+
+def limit_detections_to_count(detections, target_count):
+    """단발성 노이즈 때문에 raw 검출이 더 많을 때 약한 후보부터 제외한다."""
+    target_count = max(0, int(target_count))
+    raw_count = sum(int(det.get("estimated_count", 1)) for det in detections)
+    if target_count <= 0:
+        return []
+    if raw_count <= target_count:
+        return detections
+
+    ranked = sorted(detections, key=detection_quality, reverse=True)
+    kept = []
+    used = 0
+    for det in ranked:
+        est = max(1, int(det.get("estimated_count", 1)))
+        remaining = target_count - used
+        if remaining <= 0:
+            break
+
+        if est <= remaining:
+            kept.append(det)
+            used += est
+            continue
+
+        clipped = dict(det)
+        clipped["estimated_count"] = remaining
+        kept.append(clipped)
+        used += remaining
+
+    return kept
+
+
 def count_blocks_cv(
     image_bgr,
     depth_m=None,
     roi=None,
     roi_polygon=None,
     min_area=DEBUG_CV_MIN_AREA,
+    min_area_ratio=DEBUG_CV_MIN_AREA_RATIO,
     fixed_max_area=DEBUG_CV_FIXED_MAX_AREA,
     area_y_top=DEBUG_CV_AREA_Y_TOP,
     area_y_bottom=DEBUG_CV_AREA_Y_BOTTOM,
@@ -616,6 +669,7 @@ def count_blocks_cv(
     watershed_dist_ratio=DEBUG_CV_WATERSHED_DIST_RATIO,
     watershed_max_parts=DEBUG_CV_WATERSHED_MAX_PARTS,
     split_min_area_ratio=DEBUG_CV_SPLIT_MIN_AREA_RATIO,
+    roi_inner_margin=DEBUG_ROI_INNER_MARGIN,
 ):
     crop_bgr, offset_x, offset_y, active_roi, active_polygon = crop_for_inference(
         image_bgr=image_bgr,
@@ -625,17 +679,28 @@ def count_blocks_cv(
 
     roi_mask = make_crop_mask(crop_bgr.shape, offset_x, offset_y, active_polygon)
 
+    # ROI 경계 여백 마스크: Canny 가 폴리곤 경계를 엣지로 잡는 것을 차단.
+    # roi_mask 를 roi_inner_margin 픽셀 침식해 경계 안쪽만 검출 영역으로 사용한다.
+    if int(roi_inner_margin) > 0:
+        _m = int(roi_inner_margin)
+        _inner_k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (_m * 2 + 1, _m * 2 + 1))
+        roi_mask_inner = cv2.erode(roi_mask, _inner_k, iterations=1)
+    else:
+        roi_mask_inner = roi_mask
+
     hsv = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2HSV)
     saturation = hsv[:, :, 1]
     sat_mask = cv2.inRange(saturation, int(sat_min), 255)
-    rgb_foreground = cv2.bitwise_and(sat_mask, roi_mask)
+    rgb_foreground = cv2.bitwise_and(sat_mask, roi_mask_inner)
 
     if use_edge:
         gray = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2GRAY)
         gray = cv2.GaussianBlur(gray, (5, 5), 0)
         edge_mask = cv2.Canny(gray, int(edge_low), int(edge_high))
+        # Canny 경계 아티팩트 차단: edge_mask 에도 축소 마스크 적용
+        edge_mask = cv2.bitwise_and(edge_mask, roi_mask_inner)
         rgb_foreground = cv2.bitwise_or(rgb_foreground, edge_mask)
-        rgb_foreground = cv2.bitwise_and(rgb_foreground, roi_mask)
+        rgb_foreground = cv2.bitwise_and(rgb_foreground, roi_mask_inner)
 
     depth_debug = None
     depth_used = False
@@ -707,6 +772,9 @@ def count_blocks_cv(
             kernel,
             iterations=int(open_iterations),
         )
+
+    # 모폴로지 이후 남아있을 수 있는 경계 픽셀 최종 제거
+    foreground = cv2.bitwise_and(foreground, roi_mask_inner)
 
     contours, _ = cv2.findContours(
         foreground,
@@ -811,6 +879,25 @@ def count_blocks_cv(
                 )
                 continue
 
+            rgb_area_ratio = float(sub_area / single_area) if single_area > 0 else 0.0
+            if rgb_area_ratio < float(min_area_ratio):
+                rejected.append(
+                    {
+                        "reason": "small_ratio",
+                        "area": sub_area,
+                        "single_area": float(single_area),
+                        "estimated_count": 0,
+                        "center_y": int(center_y_img),
+                        "bbox_xyxy": [
+                            int(sx + offset_x),
+                            int(sy + offset_y),
+                            int(sx + sw + offset_x),
+                            int(sy + sh + offset_y),
+                        ],
+                    }
+                )
+                continue
+
             if fixed_max_area > 0.0 and sub_area > fixed_max_area:
                 rejected.append(
                     {
@@ -869,8 +956,28 @@ def count_blocks_cv(
                             float(depth_filter_min_object_ratio),
                             min(1.0, float(depth_stats["object_ratio"])),
                         )
-                        count_area = max(float(min_area), min(float(sub_area), float(count_area)))
+                        count_area = min(float(sub_area), float(count_area))
                         count_area_source = "depth_object_ratio"
+
+            count_area_ratio = float(count_area / single_area) if single_area > 0 else 0.0
+            if count_area_ratio < float(min_area_ratio):
+                rejected.append(
+                    {
+                        "reason": "depth_small_ratio" if count_area_source == "depth_object_ratio" else "small_ratio",
+                        "area": count_area,
+                        "single_area": float(single_area),
+                        "estimated_count": 0,
+                        "center_y": int(center_y_img),
+                        "depth": depth_stats,
+                        "bbox_xyxy": [
+                            int(sx + offset_x),
+                            int(sy + offset_y),
+                            int(sx + sw + offset_x),
+                            int(sy + sh + offset_y),
+                        ],
+                    }
+                )
+                continue
 
             estimated_count = estimate_blob_count(
                 area=count_area,
@@ -897,8 +1004,8 @@ def count_blocks_cv(
                     "count_area": float(count_area),
                     "count_area_source": count_area_source,
                     "single_area": float(single_area),
-                    "area_ratio": float(count_area / single_area) if single_area > 0 else 0.0,
-                    "rgb_area_ratio": float(sub_area / single_area) if single_area > 0 else 0.0,
+                    "area_ratio": count_area_ratio,
+                    "rgb_area_ratio": rgb_area_ratio,
                     "estimated_count": int(estimated_count),
                     "parent_area": parent_area,
                     "split_count": len(split_contours),
@@ -1062,6 +1169,7 @@ class DecisionAssemblyNode(Node):
         self.device = args.device
 
         self.cv_min_area = args.cv_min_area
+        self.cv_min_area_ratio = args.cv_min_area_ratio
         self.cv_fixed_max_area = args.cv_fixed_max_area
         self.cv_area_y_top = args.cv_area_y_top
         self.cv_area_y_bottom = args.cv_area_y_bottom
@@ -1097,6 +1205,7 @@ class DecisionAssemblyNode(Node):
         self.cv_watershed_dist_ratio = args.cv_watershed_dist_ratio
         self.cv_watershed_max_parts = args.cv_watershed_max_parts
         self.cv_split_min_area_ratio = args.cv_split_min_area_ratio
+        self.roi_inner_margin = args.roi_inner_margin
 
         self.process_every_n = max(1, args.process_every_n)
 
@@ -1109,6 +1218,9 @@ class DecisionAssemblyNode(Node):
         self.frame_idx = 0
         self.last_log_time = 0.0
         self.log_period_sec = max(0.0, args.log_period_sec)
+
+        self.count_smooth_n = max(1, args.count_smooth_n)
+        self.count_history: deque = deque(maxlen=self.count_smooth_n)
 
         self.mouse_xy = None
         self.roi_clicks = []
@@ -1154,6 +1266,7 @@ class DecisionAssemblyNode(Node):
             self.get_logger().info(
                 "[DECISION] cv params: "
                 f"min_area={self.cv_min_area}, "
+                f"min_area_ratio={self.cv_min_area_ratio}, "
                 f"fixed_max_area={self.cv_fixed_max_area}, "
                 f"area_y_top={self.cv_area_y_top}, "
                 f"area_y_bottom={self.cv_area_y_bottom}, "
@@ -1260,6 +1373,7 @@ class DecisionAssemblyNode(Node):
                 roi=self.roi,
                 roi_polygon=self.roi_polygon,
                 min_area=self.cv_min_area,
+                min_area_ratio=self.cv_min_area_ratio,
                 fixed_max_area=self.cv_fixed_max_area,
                 area_y_top=self.cv_area_y_top,
                 area_y_bottom=self.cv_area_y_bottom,
@@ -1290,13 +1404,20 @@ class DecisionAssemblyNode(Node):
                 watershed_dist_ratio=self.cv_watershed_dist_ratio,
                 watershed_max_parts=self.cv_watershed_max_parts,
                 split_min_area_ratio=self.cv_split_min_area_ratio,
+                roi_inner_margin=self.roi_inner_margin,
             )
             depth_used = bool(depth_debug is not None)
 
+        # rolling median으로 단발성 노이즈 제거 (모서리 깜빡임 방지)
+        self.count_history.append(total_count)
+        smoothed_count = int(round(np.median(list(self.count_history))))
+        stable_detections = limit_detections_to_count(detections, smoothed_count)
+        stable_class_counts = Counter({"blob": smoothed_count}) if stable_detections else Counter()
+
         annotated_bgr = draw_annotated(
             image_bgr=image_bgr,
-            detections=detections,
-            total_count=total_count,
+            detections=stable_detections,
+            total_count=smoothed_count,
             roi=active_roi,
             roi_polygon=active_polygon,
             rejected=rejected,
@@ -1307,9 +1428,9 @@ class DecisionAssemblyNode(Node):
             self.draw_mouse_overlay(annotated_bgr)
 
         self.publish_results(
-            total_count=total_count,
-            class_counts=class_counts,
-            detections=detections,
+            total_count=smoothed_count,
+            class_counts=stable_class_counts,
+            detections=stable_detections,
             rejected=rejected,
             method=self.method,
             roi=active_roi,
@@ -1335,9 +1456,9 @@ class DecisionAssemblyNode(Node):
         if now - self.last_log_time >= self.log_period_sec:
             self.last_log_time = now
             self.get_logger().info(
-                f"[DECISION] total_blocks={total_count}, "
-                f"classes={dict(class_counts)}, "
-                f"accepted={len(detections)}, rejected={len(rejected)}, "
+                f"[DECISION] total_blocks={smoothed_count} (raw={total_count}), "
+                f"classes={dict(stable_class_counts)}, "
+                f"accepted={len(stable_detections)} (raw={len(detections)}), rejected={len(rejected)}, "
                 f"depth_used={depth_used}, depth_debug={depth_debug}, "
                 f"roi={active_roi}, polygon={active_polygon}, "
                 f"elapsed={elapsed:.3f}s"
@@ -1403,6 +1524,7 @@ class DecisionAssemblyNode(Node):
             "depth_debug": depth_debug,
             "cv_params": {
                 "min_area": float(self.cv_min_area),
+                "min_area_ratio": float(self.cv_min_area_ratio),
                 "fixed_max_area": float(self.cv_fixed_max_area),
                 "area_y_top": float(self.cv_area_y_top),
                 "area_y_bottom": float(self.cv_area_y_bottom),
@@ -1471,6 +1593,7 @@ def build_arg_parser():
     parser.add_argument("--device", default=DEBUG_YOLO_DEVICE)
 
     parser.add_argument("--cv-min-area", type=float, default=DEBUG_CV_MIN_AREA)
+    parser.add_argument("--cv-min-area-ratio", type=float, default=DEBUG_CV_MIN_AREA_RATIO)
     parser.add_argument("--cv-fixed-max-area", type=float, default=DEBUG_CV_FIXED_MAX_AREA)
     parser.add_argument("--cv-max-area", dest="cv_fixed_max_area", type=float)
 
@@ -1509,8 +1632,10 @@ def build_arg_parser():
     parser.add_argument("--cv-watershed-dist-ratio", type=float, default=DEBUG_CV_WATERSHED_DIST_RATIO)
     parser.add_argument("--cv-watershed-max-parts", type=int, default=DEBUG_CV_WATERSHED_MAX_PARTS)
     parser.add_argument("--cv-split-min-area-ratio", type=float, default=DEBUG_CV_SPLIT_MIN_AREA_RATIO)
+    parser.add_argument("--roi-inner-margin", type=int, default=DEBUG_ROI_INNER_MARGIN)
 
     parser.add_argument("--process-every-n", type=int, default=DEBUG_PROCESS_EVERY_N)
+    parser.add_argument("--count-smooth-n", type=int, default=DEBUG_COUNT_SMOOTH_N)
 
     parser.add_argument("--roi", nargs=4, type=float, metavar=("X1", "Y1", "X2", "Y2"), default=None)
     parser.add_argument("--roi-polygon", nargs="+", type=float, metavar="XY", default=DEBUG_ROI_POLYGON)

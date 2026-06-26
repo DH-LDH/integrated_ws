@@ -27,7 +27,9 @@ setup(
             'robot_node = control_pkg.robot_node:main',
             'master_node = control_pkg.master_node:main',
             'master_node_dis = control_pkg.master_node_dis:main',
-            'command_node = control_pkg.command_node:main',           
+            'command_node = control_pkg.command_node:main',
+            'khj_point_node = control_pkg.khj_point_node:main',
+            'coord_debug_node = control_pkg.coord_debug_node:main',
         ],
     },
 )

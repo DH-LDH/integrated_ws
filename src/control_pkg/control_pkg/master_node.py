@@ -1,9 +1,10 @@
+import json
 import rclpy
 from rclpy.node import Node
 
 from srvs_pkg.srv import GetTargetPose
 from std_srvs.srv import SetBool, Trigger
-from std_msgs.msg import Int32
+from std_msgs.msg import Int32, String
 
 import time
 import math
@@ -24,7 +25,7 @@ HOME_X_SEARCH_STEP_M_DEFAULT = 0.150
 
 # 정밀 재촬영 시, 대상 블록 중심에서 global y축 방향으로 이동할 거리.
 # 현재 기본값 +0.100m = global y축 +100mm 방향
-PRECISION_SCAN_GLOBAL_Y_OFFSET_DEFAULT = 0.080
+PRECISION_SCAN_GLOBAL_Y_OFFSET_DEFAULT = 0.200
 
 # 처음 인식한 pose.x가 음수인 블록만 정밀 재촬영 위치를 추가 보정할지 여부
 NEGATIVE_X_SCAN_EXTRA_ENABLE_DEFAULT = True
@@ -41,6 +42,16 @@ STUD_PITCH = 0.016  # 스터드 간격 (m)
 SAME_CLASS_VERIFY_XY_TOLERANCE_M = 0.040
 POSE_EXCLUSION_XY_TOLERANCE_M = 0.045
 DECISION_BLOCK_COUNT_TOPIC_DEFAULT = "/decision_assembly/block_count"
+
+# KHJ 버드아이뷰 offset_cm → 로봇 팔 좌표 변환 계수
+# [실측 결론] 로봇1=남쪽, 버드아이=서쪽 구조:
+#   offset_cm.x  → robot_x (동일 부호)
+#   offset_cm.y  → robot_y (반전:  robot_y = -offset_cm.y * scale)
+#
+# 이전 파라미터명(khj_y_to_robot_x, khj_x_to_robot_y)은 축이 잘못 명명되어
+# 아래 두 파라미터로 대체한다.
+KHJ_X_TO_ROBOT_X_DEFAULT =  0.01   # offset_cm.x → robot_x  (cm → m 변환, birdseye 실제 단위 기준)
+KHJ_Y_TO_ROBOT_Y_DEFAULT =  0.01   # offset_cm.y → robot_y  (cm → m 변환, birdseye 실제 단위 기준)
 
 
 # 기존 CLASS_TO_TARGET_ID 매핑 유지
@@ -76,6 +87,8 @@ class MasterNode(Node):
         self.cli_r2 = self.create_client(GetTargetPose, "/robot2/robot_move_step")
         self.cli_g = self.create_client(SetBool, "/control_gripper")
         self.cli_h = self.create_client(Trigger, "/robot1/robot_home")
+        self.cli_scan_all_blocks = self.create_client(Trigger, "/scan_all_blocks")
+        self.cli_lock_positions = self.create_client(Trigger, "/lock_positions")
 
         # ------------------------------------------------------------- #
         # 기존 ROS 파라미터 구조 유지
@@ -157,11 +170,11 @@ class MasterNode(Node):
             ).value
         )
 
-        self.assembly_completed = False
         self.last_perfect_pose = None
         self.home_x_search_skip_z_classes = set()
         self.precision_scan_requests = {}
         self.last_precision_scan_request = None
+        self.assembly_completed = False
         # legacy retry pose 저장소. 현재 block_count 검증은 새 retry pose를 만들지 않는다.
         self.last_verify_visible_poses = {}
         self.held_class = None
@@ -179,6 +192,26 @@ class MasterNode(Node):
             self.DECISION_BLOCK_COUNT_TOPIC,
             self.decision_block_count_cb,
             10,
+        )
+
+        # ------------------------------------------------------------- #
+        # KHJ 버드아이뷰 포인트 구독
+        # /khj_point 로 들어오는 offset_cm을 로봇 재촬영 XY 기준점으로 변환해
+        # calc_precision_scan_xy()에서 pose.x/y 대신 사용할 수 있게 한다.
+        #
+        # [실측 확인된 올바른 매핑]
+        #   robot_x =  offset_cm.x * KHJ_X_TO_ROBOT_X
+        #   robot_y = -offset_cm.y * KHJ_Y_TO_ROBOT_Y  (부호 반전)
+        # ------------------------------------------------------------- #
+        self.KHJ_X_TO_ROBOT_X = float(
+            self.declare_parameter("khj_x_to_robot_x", KHJ_X_TO_ROBOT_X_DEFAULT).value
+        )
+        self.KHJ_Y_TO_ROBOT_Y = float(
+            self.declare_parameter("khj_y_to_robot_y", KHJ_Y_TO_ROBOT_Y_DEFAULT).value
+        )
+        self._khj_data: dict = {}
+        self.khj_sub = self.create_subscription(
+            String, "/khj_point", self._khj_cb, 10
         )
 
         self.get_logger().info(
@@ -377,6 +410,50 @@ class MasterNode(Node):
             self.cli_r2,
             GetTargetPose.Request(target_size="ASSEMBLY_JOINT"),
         )
+
+    def scan_all_blocks_at_home(self):
+        """
+        조립 시작 전 전면 카메라 ID 매핑을 갱신하고 birdseye 위치를 동결한다.
+        실패해도 조립 자체는 기존 vision fallback을 사용할 수 있으므로 경고만 남긴다.
+        """
+        def call_trigger_if_available(cli, label, service_timeout_sec=2.0, response_timeout_sec=15.0):
+            if not cli.wait_for_service(timeout_sec=service_timeout_sec):
+                self.get_logger().warn(f"[INIT] {label} 서비스 없음. 건너뜁니다.")
+                return None
+            future = cli.call_async(Trigger.Request())
+            deadline = time.monotonic() + response_timeout_sec
+            while rclpy.ok() and not future.done() and time.monotonic() < deadline:
+                time.sleep(0.02)
+            if not future.done():
+                self.get_logger().warn(
+                    f"[INIT] {label} 응답 타임아웃({response_timeout_sec:.1f}s). 건너뜁니다."
+                )
+                return None
+            return future.result()
+
+        self.get_logger().info("[INIT] 전체 블록 스캔 요청: /scan_all_blocks")
+        scan_res = call_trigger_if_available(
+            self.cli_scan_all_blocks,
+            "/scan_all_blocks",
+            response_timeout_sec=20.0,
+        )
+        if scan_res is None or not scan_res.success:
+            self.get_logger().warn("[INIT] /scan_all_blocks 실패. 기존 인식 경로로 계속 진행합니다.")
+            return False
+
+        time.sleep(0.5)
+
+        self.get_logger().info("[INIT] birdseye 위치 동결 요청: /lock_positions")
+        lock_res = call_trigger_if_available(
+            self.cli_lock_positions,
+            "/lock_positions",
+            response_timeout_sec=5.0,
+        )
+        if lock_res is None or not lock_res.success:
+            self.get_logger().warn("[INIT] /lock_positions 실패. birdseye 최신값으로 계속 진행합니다.")
+            return False
+
+        return True
 
     def drop_assembly(self, drop_target_size):
         """
@@ -606,7 +683,57 @@ class MasterNode(Node):
 
         return target_x, target_y
 
-    def calc_precision_scan_xy(self, pose):
+    def _khj_cb(self, msg: String):
+        try:
+            self._khj_data = json.loads(msg.data)
+        except Exception as e:
+            self.get_logger().warn(f"[KHJ] 파싱 실패: {e}")
+
+    def get_khj_scan_base_xy(self, class_name: str, local_id: int = 0):
+        """
+        /khj_point 에서 class_name 이 일치하는 local_id 번째 항목의
+        offset_cm → 로봇 팔 XY (m) 를 반환한다.
+        매칭이 없으면 None 반환.
+        """
+        if not self._khj_data:
+            return None
+
+        matches = sorted(
+            [
+                (id_str, v)
+                for id_str, v in self._khj_data.items()
+                if str(v.get("class_name", "")).strip() == str(class_name).strip()
+            ],
+            key=lambda kv: int(kv[0]) if kv[0].isdigit() else 0,
+        )
+
+        if not matches or local_id >= len(matches):
+            self.get_logger().warn(
+                f"[KHJ] '{class_name}' local_id={local_id} 매칭 없음 "
+                f"(khj 항목 수={len(self._khj_data)})"
+            )
+            return None
+
+        _, block = matches[local_id]
+        offset_cm = block.get("offset_cm", {})
+        ox = float(offset_cm.get("x", 0.0))
+        oy = float(offset_cm.get("y", 0.0))
+
+        # [실측 확인] 로봇1=남쪽, 버드아이=서쪽 기준:
+        #   offset_cm.x → robot_x (동일 부호)
+        #   offset_cm.y → robot_y (부호 반전)
+        robot_x =  ox * self.KHJ_X_TO_ROBOT_X
+        robot_y = -oy * self.KHJ_Y_TO_ROBOT_Y
+
+        self.get_logger().info(
+            f"[KHJ] '{class_name}' local_id={local_id}: "
+            f"offset_cm=({ox:.2f}, {oy:.2f}) → "
+            f"robot_x=ox*{self.KHJ_X_TO_ROBOT_X:.5f}={robot_x:.4f}m, "
+            f"robot_y=-oy*{self.KHJ_Y_TO_ROBOT_Y:.5f}={robot_y:.4f}m"
+        )
+        return robot_x, robot_y
+
+    def calc_precision_scan_xy(self, pose, local_id=0):
         """
         정밀 재촬영 위치 계산.
 
@@ -615,51 +742,48 @@ class MasterNode(Node):
             scan_x = pose.x
             scan_y = pose.y + precision_scan_global_y_offset_m
 
+        /khj_point에 해당 블록 데이터가 있으면 pose.x / pose.y 대신
+        KHJ offset_cm을 로봇 좌표로 변환한 base_x / base_y를 기준으로 사용한다.
+
         추가 보정:
-            처음 scan에서 인식된 pose.x가 음수이면, 그 블록은 카메라 시야에서
-            한쪽으로 치우쳐 있다고 보고 scan_x를 global x축 방향으로 50mm 더 이동한다.
-
-        기본값:
-            precision_scan_global_y_offset_m = +0.100
-            negative_x_extra_global_x_offset_m = -0.050
-
-        따라서 pose.x < 0이면:
-            scan_x = pose.x - 0.050
-            scan_y = pose.y + 0.100
-
-        pose.x >= 0이면:
-            scan_x = pose.x
-            scan_y = pose.y + 0.100
-
-        이 계산은 블록 yaw를 전혀 사용하지 않는다.
+            base_x > 0이면 scan_x에 negative_x_extra_global_x_offset_m을 더한다.
         """
+        class_name = str(getattr(pose, "class_name", "")).strip()
+        khj_xy = self.get_khj_scan_base_xy(class_name, local_id=local_id) if class_name else None
+        if khj_xy is not None:
+            base_x, base_y = khj_xy
+            base_source = "KHJ"
+        else:
+            base_x, base_y = pose.x, pose.y
+            base_source = "vision_pose"
 
         # 1) 기본 재촬영 위치: 블록 중심 기준 global y offset만 적용
-        scan_x = pose.x
-        scan_y = pose.y + self.PRECISION_SCAN_GLOBAL_Y_OFFSET_M
+        scan_x = base_x
+        scan_y = base_y + self.PRECISION_SCAN_GLOBAL_Y_OFFSET_M
 
         negative_x_extra_applied = False
 
-        # 2) 처음 인식한 pose.x가 음수인 경우에만 global x축 추가 보정 적용
-        if self.NEGATIVE_X_SCAN_EXTRA_ENABLE and pose.x >0.0:
+        # 2) 기준 x가 양수인 경우에만 global x축 추가 보정 적용
+        if self.NEGATIVE_X_SCAN_EXTRA_ENABLE and base_x > 0.0:
             scan_x += self.NEGATIVE_X_EXTRA_GLOBAL_X_OFFSET_M
             negative_x_extra_applied = True
 
             self.get_logger().info(
-                "[PRECISION][NEGATIVE X] 처음 scan pose.x가 음수이므로 "
+                "[PRECISION][EXTRA X] 기준 x가 양수이므로 "
                 "global x 추가 이동 적용: "
-                f"pose.x={pose.x:.4f}m, "
+                f"base_source={base_source}, base_x={base_x:.4f}m, "
                 f"extra_global_x={self.NEGATIVE_X_EXTRA_GLOBAL_X_OFFSET_M:.4f}m"
             )
         else:
             self.get_logger().info(
-                "[PRECISION][NORMAL X] 처음 scan pose.x가 음수가 아니므로 "
+                "[PRECISION][NORMAL X] 기준 x가 양수가 아니므로 "
                 "global x 추가 이동 없음: "
-                f"pose.x={pose.x:.4f}m"
+                f"base_source={base_source}, base_x={base_x:.4f}m"
             )
 
         self.get_logger().info(
-            "[PRECISION] 재촬영 위치: block center 기준, yaw 무시, "
+            "[PRECISION] 재촬영 위치: yaw 무시, "
+            f"base_source={base_source}, base=({base_x:.4f}, {base_y:.4f})m, "
             f"global_y_offset={self.PRECISION_SCAN_GLOBAL_Y_OFFSET_M:.4f}m, "
             f"negative_x_extra_applied={negative_x_extra_applied} -> "
             f"scan_x={scan_x:.4f}m, scan_y={scan_y:.4f}m"
@@ -791,14 +915,12 @@ class MasterNode(Node):
         # 2. 정밀 재촬영
         # ------------------------------------------------------------- #
         if enable_precision_scan and original_class_name:
-            scan_x, scan_y = self.calc_precision_scan_xy(pose)
-            scan_z = 0.0 if skip_precision_z else self.PRE_XY_LOWER
-            scan_target_size = "XY" if skip_precision_z else "APPROACH"
+            scan_x, scan_y = self.calc_precision_scan_xy(pose, local_id=local_id)
             scan_request = {
                 "x": scan_x,
                 "y": scan_y,
-                "z": scan_z,
-                "target_size": scan_target_size,
+                "z": self.PRE_XY_LOWER,
+                "target_size": "Z_then_XY",
                 "skip_z": skip_precision_z,
                 "expected_x": pose.x,
                 "expected_y": pose.y,
@@ -807,22 +929,22 @@ class MasterNode(Node):
             self.precision_scan_requests[original_class_name] = scan_request
             self.last_precision_scan_request = scan_request
 
-            self.get_logger().info(
-                f"[PRECISION] 재촬영 위치 이동: "
-                f"x={scan_x:.4f}m, y={scan_y:.4f}m, "
-                f"z={scan_z:.1f}mm, yaw=0.0deg, "
-                f"target_size={scan_target_size}"
-            )
+            if not skip_precision_z:
+                self.get_logger().info(
+                    f"[PRECISION] Z 먼저 하강: z={self.PRE_XY_LOWER:.1f}mm"
+                )
+                self.call(
+                    self.cli_r,
+                    GetTargetPose.Request(z=self.PRE_XY_LOWER, target_size="Z"),
+                )
+                time.sleep(self.WAIT_TIME)
 
+            self.get_logger().info(
+                f"[PRECISION] XY 이동: x={scan_x:.4f}m, y={scan_y:.4f}m"
+            )
             self.call(
                 self.cli_r,
-                GetTargetPose.Request(
-                    x=scan_x,
-                    y=scan_y,
-                    z=scan_z,
-                    yaw=0.0,
-                    target_size=scan_target_size,
-                ),
+                GetTargetPose.Request(x=scan_x, y=scan_y, z=0.0, target_size="XY"),
             )
             time.sleep(self.WAIT_TIME)
 
@@ -974,6 +1096,7 @@ class MasterNode(Node):
         self.held_class = None
 
         p = self.find_target_with_retry(color, local_id=local_id)
+
         if not p:
             return False
 
@@ -1039,6 +1162,7 @@ class MasterNode(Node):
         do_final_lower=True,
         local_id=0,
         base_pose=None,
+        pre_khj_scan=False,
     ):
         """
         조립 대상 블록을 카메라로 인식한 뒤 그 위에 현재 들고 있는 블록을 적층한다.
@@ -1047,6 +1171,10 @@ class MasterNode(Node):
         - 조립 직후에는 release_gripper=True여도 그리퍼를 열지 않는다.
         - HOME 이동 전 별도 Z 상승은 하지 않는다. Z_MARGIN은 접근/최종 하강에만 쓴다.
         - 조립 전후 /decision_assembly/block_count가 줄어들면 성공으로 판단한다.
+
+        pre_khj_scan=True:
+          매 시도마다 KHJ 스캔 위치로 먼저 이동한 뒤 그 자리에서 비전을 수행한다.
+          move_fast_from_pose 내부의 precision scan(재이동)은 생략한다.
         """
         target_color = str(target_color).strip()
 
@@ -1064,6 +1192,17 @@ class MasterNode(Node):
                 f"[INSERT ATTEMPT] {target_color} visual_insert {attempt}회차"
             )
 
+            # ── 바닥 블록 개수 읽기 (HOME 위치, 스캔 이동 전) ──────────────
+            # pre_khj_scan 사용 시 KHJ 스캔 위치로 이동하기 전에 읽어야
+            # 로봇 팔이 시야를 가리지 않는 상태의 정확한 count를 얻는다.
+            if self.current_floor_count_at_home is None:
+                self.current_floor_count_at_home = self.read_floor_count_at_home(
+                    f"{target_color} 조립 전"
+                )
+                if self.current_floor_count_at_home is None:
+                    return False
+            # ─────────────────────────────────────────────────────────────
+
             use_verify_pose = retry_pose is not None
             if use_verify_pose:
                 p = retry_pose
@@ -1071,22 +1210,53 @@ class MasterNode(Node):
                 self.get_logger().info(
                     "[RETRY WITHOUT HOME] 저장된 retry pose로 바로 재조립합니다."
                 )
+            elif base_pose is not None:
+                p = base_pose
             else:
-                p = base_pose if base_pose is not None else self.find_target_with_retry(
-                    target_color,
-                    local_id=local_id,
-                )
-                if not p:
-                    return False
+                if pre_khj_scan:
+                    # KHJ 스캔 위치로 먼저 이동한 뒤 그 자리에서 비전
+                    # 순서: Z 먼저 하강 → XY 이동
+                    khj_xy = self.get_khj_scan_base_xy(target_color, local_id=local_id)
+                    if khj_xy is not None:
+                        base_x, base_y = khj_xy
+                        scan_x = base_x
+                        if self.NEGATIVE_X_SCAN_EXTRA_ENABLE and base_x > 0.0:
+                            scan_x += self.NEGATIVE_X_EXTRA_GLOBAL_X_OFFSET_M
+                        scan_y = base_y + self.PRECISION_SCAN_GLOBAL_Y_OFFSET_M
+                        self.get_logger().info(
+                            f"[PRE-KHJ-SCAN] '{target_color}': "
+                            f"Z 하강 {self.PRE_XY_LOWER:.1f}mm → "
+                            f"XY 이동 ({scan_x:.4f}m, {scan_y:.4f}m)"
+                        )
+                        self.call(
+                            self.cli_r,
+                            GetTargetPose.Request(z=self.PRE_XY_LOWER, target_size="Z"),
+                        )
+                        time.sleep(self.WAIT_TIME)
+                        self.call(
+                            self.cli_r,
+                            GetTargetPose.Request(
+                                x=scan_x, y=scan_y, z=0.0, target_size="XY"
+                            ),
+                        )
+                        time.sleep(self.WAIT_TIME)
+                    else:
+                        self.get_logger().warn(
+                            f"[PRE-KHJ-SCAN] '{target_color}' KHJ 데이터 없음. "
+                            "현재 위치에서 비전 진행합니다."
+                        )
+                    p = self.find_target_with_retry(
+                        target_color,
+                        enable_home_x_search=False,
+                        local_id=local_id,
+                    )
+                else:
+                    p = self.find_target_with_retry(target_color, local_id=local_id)
+            if not p:
+                return False
 
             self.last_perfect_pose = p
             held_before_insert = self.held_class
-            if self.current_floor_count_at_home is None:
-                self.current_floor_count_at_home = self.read_floor_count_at_home(
-                    f"{target_color} 조립 전"
-                )
-                if self.current_floor_count_at_home is None:
-                    return False
             self.current_insert_start_count = self.current_floor_count_at_home
             self.current_insert_verify_after_time = None
             self.get_logger().info(
@@ -1094,13 +1264,15 @@ class MasterNode(Node):
                 f"{self.current_insert_start_count}"
             )
 
+            # pre_khj_scan=True이면 이미 스캔 위치에서 비전을 마쳤으므로 내부 precision scan 생략
+            skip_precision = use_verify_pose or (pre_khj_scan and base_pose is None)
             if not self.move_fast_from_pose(
                 p,
                 layer_index=layer_index,
                 yaw_offset=yaw_offset + self.WRIST_OFFSET,
                 offset_studs_x=offset_studs_x,
                 offset_studs_y=offset_studs_y,
-                enable_precision_scan=not use_verify_pose,
+                enable_precision_scan=not skip_precision,
                 do_final_lower=do_final_lower,
                 local_id=local_id,
             ):
@@ -1498,71 +1670,70 @@ class MasterNode(Node):
 
     def build_burger(self):
         self.get_logger().info(
-            "[버거] 4x2_yellow(Pick) -> 4x2_red 결합 -> "
-            "2x2_red로 6x2 조립 -> 4x2_yellow 최종 결합"
+            "[버거] 4x2_yellow(Pick) -> KHJ 스캔 -> 4x2_red 결합 -> "
+            "2x2_red 결합 -> 4x2_yellow 최종 결합"
         )
-        saved_bottom_yellow_pose = None
 
         self.get_logger().info("[Phase 1] 4x2_yellow 파지")
         if not self.pick_target("4x2_yellow"):
             self.get_logger().warn("4x2_yellow 파지 실패. 조립 취소.")
             return
+        # pick_target은 HOME + verify로 끝남
 
+        # Phase 간 HOME 복귀 + 바닥 블록 개수 확인 (다음 phase 기준값 갱신)
         self.call(self.cli_h, Trigger.Request())
-        self.get_logger().info("[Phase 1-2] 남은 4x2_yellow 위치 저장")
-        saved_bottom_yellow_pose = self.find_target_with_retry("4x2_yellow")
-        if not saved_bottom_yellow_pose:
-            self.get_logger().warn(
-                "남은 4x2_yellow 위치 저장 실패. Phase 4 메모리 fallback 없이 진행합니다."
-            )
+        time.sleep(self.WAIT_TIME)
+        self.current_floor_count_at_home = None  # visual_insert 시작 시 HOME에서 재취득
 
         self.get_logger().info(
-            "[Phase 2] 들고 있는 4x2_yellow -> 4x2_red 결합, 그리퍼 유지"
+            "[Phase 2] KHJ 스캔 위치 이동 후 4x2_red 비전 → 결합 (그리퍼 유지)"
         )
         if not self.visual_insert(
             "4x2_red",
             layer_index=0.7,
             offset_studs_y=-1.0,
             release_gripper=False,
+            pre_khj_scan=True,
         ):
             self.get_logger().warn("4x2_red 인식/결합 실패. 조립 취소.")
             return
 
+        # Phase 간 HOME 복귀 + 바닥 블록 개수 확인
         self.call(self.cli_h, Trigger.Request())
-        time.sleep(1.0)
+        time.sleep(self.WAIT_TIME)
+        self.current_floor_count_at_home = None
 
         self.get_logger().info(
-            "[Phase 3] 2x2_red 위에 얹어 6x2 조립, 그리퍼 유지"
+            "[Phase 3] KHJ 스캔 위치 이동 후 2x2_red 비전 → 결합 (그리퍼 유지)"
         )
         if not self.visual_insert(
             "2x2_red",
             layer_index=0.7,
             offset_studs_y=2.0,
             release_gripper=False,
+            pre_khj_scan=True,
         ):
             self.get_logger().warn("2x2_red 인식/결합 실패. 조립 취소.")
             return
 
+        # Phase 간 HOME 복귀 + 바닥 블록 개수 확인
         self.call(self.cli_h, Trigger.Request())
+        time.sleep(self.WAIT_TIME)
+        self.current_floor_count_at_home = None
 
-        self.get_logger().info("[Phase 4] 바닥 4x2_yellow에 최종 결합")
-        if self.visual_insert("4x2_yellow", layer_index=1.4):
+        self.get_logger().info(
+            "[Phase 4] KHJ 스캔 위치 이동 후 4x2_yellow 비전 → 최종 결합"
+        )
+        if self.visual_insert(
+            "4x2_yellow",
+            layer_index=1.4,
+            pre_khj_scan=True,
+        ):
             self.assembly_completed = True
             self.get_logger().info("[완료] 버거")
             return
 
-        self.get_logger().warn(
-            "[Phase 4] 현재 시야에서 4x2_yellow 인식 실패. 저장한 위치로 fallback합니다."
-        )
-        if saved_bottom_yellow_pose and self.blind_insert(
-            saved_bottom_yellow_pose,
-            layer_index=1.5,
-        ):
-            self.assembly_completed = True
-            self.get_logger().info("[완료] 버거 (저장 위치 fallback)")
-            return
-
-        self.get_logger().warn("저장된 4x2_yellow 위치도 없어 버거 최종 결합 실패.")
+        self.get_logger().warn("버거 최종 결합 실패.")
 
     # def build_ice_cream(self):
     #     self.get_logger().info("[아이스크림] 모듈형 조립 전략")
@@ -2196,21 +2367,6 @@ class MasterNode(Node):
             "큰나무":     self.build_big_tree,
         }
 
-        # 완성체 내려놓는 관절 위치: S=소형, M=중형, L=대형
-        assembly_drop_map = {
-            "1": "ASSEMBLY_DROP_S", "battery":    "ASSEMBLY_DROP_S", "배터리":     "ASSEMBLY_DROP_S",
-            "2": "ASSEMBLY_DROP_S", "magnet":     "ASSEMBLY_DROP_S", "자석":       "ASSEMBLY_DROP_S",
-            "3": "ASSEMBLY_DROP_S", "estop":      "ASSEMBLY_DROP_S", "비상정지":   "ASSEMBLY_DROP_S",
-            "4": "ASSEMBLY_DROP_M", "carrot":     "ASSEMBLY_DROP_M", "당근":       "ASSEMBLY_DROP_M",
-            "5": "ASSEMBLY_DROP_M", "traffic":    "ASSEMBLY_DROP_M", "신호등":     "ASSEMBLY_DROP_M",
-            "6": "ASSEMBLY_DROP_M", "tree":       "ASSEMBLY_DROP_M", "작은나무":   "ASSEMBLY_DROP_M",
-            "7": "ASSEMBLY_DROP_M", "hammer":     "ASSEMBLY_DROP_M", "망치":       "ASSEMBLY_DROP_M",
-            "8": "ASSEMBLY_DROP_L", "bigcarrot":  "ASSEMBLY_DROP_L", "큰당근":     "ASSEMBLY_DROP_L",
-            "9": "ASSEMBLY_DROP_M", "burger":     "ASSEMBLY_DROP_M", "버거":       "ASSEMBLY_DROP_M",
-            "10": "ASSEMBLY_DROP_L", "icecream":  "ASSEMBLY_DROP_L", "아이스크림": "ASSEMBLY_DROP_L",
-            "11": "ASSEMBLY_DROP_L", "big_tree":  "ASSEMBLY_DROP_L", "큰나무":     "ASSEMBLY_DROP_L",
-        }
-
         print("\n=== Master Node Assembly Keyboard Select ===")
         print("1: 배터리 / 2: 자석 / 3: 비상정지 / 4: 당근 / 5: 신호등 / 6: 작은나무")
         print("7: 망치 / 8: 큰당근 / 9: 버거 / 10: 아이스크림 / 11: 큰나무")
@@ -2235,7 +2391,6 @@ class MasterNode(Node):
 
             self.get_logger().info(f"작업 시작: {user_input}")
             self.post_action_home_done = False
-            self.assembly_completed = False
 
             action()
 
@@ -2249,15 +2404,6 @@ class MasterNode(Node):
                 )
                 self.call(self.cli_h, Trigger.Request())
                 time.sleep(1.0)
-
-            if self.assembly_completed:
-                drop_target_size = assembly_drop_map.get(user_input)
-                if drop_target_size:
-                    self.get_logger().info(
-                        f"[ASSEMBLY DROP] 완성체 내려놓기 시작: {drop_target_size}"
-                    )
-                    self.drop_assembly(drop_target_size)
-                    self.post_action_home_done = True
 
             self.get_logger().info("개별 조립 완료")
 

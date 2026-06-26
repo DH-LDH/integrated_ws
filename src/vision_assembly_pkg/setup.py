@@ -28,6 +28,7 @@ setup(
     entry_points={
         'console_scripts': [
             'decision_assembly = vision_assembly_pkg.decision_assembly:main',
+            'birdseye_assembly = vision_assembly_pkg.birdseye_assembly:main',
         ],
     },
 )

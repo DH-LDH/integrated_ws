@@ -2,7 +2,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, TimerAction, IncludeLaunchDescription
 from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, PythonExpression
 
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
@@ -38,7 +38,7 @@ def generate_launch_description():
 
         DeclareLaunchArgument(
             'run_command_node',
-            default_value='true',
+            default_value='false',
             description='Run control_pkg command_node'
         ),
 
@@ -70,7 +70,7 @@ def generate_launch_description():
         # vision_node와 카메라 충돌이 날 수 있으므로 기본값 false
         DeclareLaunchArgument(
             'run_vision_node',
-            default_value='false',
+            default_value='true',
             description='Run vision_pkg vision_node'
         ),
 
@@ -189,6 +189,42 @@ def generate_launch_description():
         ),
 
         # =========================
+        # Birdseye Assembly Node
+        # decision_assembly(4s) 이후 기동
+        # =========================
+
+        TimerAction(
+            period=6.0,
+            actions=[
+                Node(
+                    package='vision_assembly_pkg',
+                    executable='birdseye_assembly',
+                    name='birdseye_assembly',
+                    output='screen',
+                    emulate_tty=True,
+                ),
+            ],
+        ),
+
+        # =========================
+        # KHJ Point Node
+        # vision_node(2s) + birdseye_assembly(6s) 이후 기동
+        # =========================
+
+        TimerAction(
+            period=8.0,
+            actions=[
+                Node(
+                    package='control_pkg',
+                    executable='khj_point_node',
+                    name='khj_point_node',
+                    output='screen',
+                    emulate_tty=True,
+                ),
+            ],
+        ),
+
+        # =========================
         # Command Node
         # 키보드 입력 때문에 xterm 실행 권장
         # =========================
@@ -202,7 +238,15 @@ def generate_launch_description():
                     name='command_node',
                     output='screen',
                     emulate_tty=True,
-                    condition=UnlessCondition(use_xterm_for_command),
+                    condition=IfCondition(
+                        PythonExpression([
+                            "'",
+                            run_command_node,
+                            "' == 'true' and '",
+                            use_xterm_for_command,
+                            "' != 'true'",
+                        ])
+                    ),
                 ),
             ],
         ),
@@ -217,7 +261,15 @@ def generate_launch_description():
                     output='screen',
                     emulate_tty=True,
                     prefix='xterm -hold -e',
-                    condition=IfCondition(use_xterm_for_command),
+                    condition=IfCondition(
+                        PythonExpression([
+                            "'",
+                            run_command_node,
+                            "' == 'true' and '",
+                            use_xterm_for_command,
+                            "' == 'true'",
+                        ])
+                    ),
                 ),
             ],
         ),

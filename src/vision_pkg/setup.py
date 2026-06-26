@@ -24,6 +24,7 @@ setup(
     entry_points={
         'console_scripts': [
             'vision_node = vision_pkg.vision_node:main',
+            'target_id_mapper = vision_pkg.target_id_mapper:main',
         ],
     },
     package_data={
