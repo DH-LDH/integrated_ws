@@ -29,8 +29,8 @@ DEBUG_ANNOTATED_TOPIC = "/decision_assembly/annotated_image"
 DEBUG_COUNT_TOPIC = "/decision_assembly/block_count"
 DEBUG_SUMMARY_TOPIC = "/decision_assembly/summary"
 
-# ROI polygon: 좌상 → 우상 → 우하 → 좌하 순서
-DEBUG_ROI_POLYGON = [234, 0, 478, 0, 640, 480, 90, 480]
+# ROI polygon: 좌상 → 우상 → 우하 → 좌하 순서 (카메라 180° 재설치 기준)
+DEBUG_ROI_POLYGON = [24, 0, 572, 0, 423, 480, 155, 480]
 
 # CV blob 필터
 DEBUG_CV_MIN_AREA = 600.0
@@ -42,13 +42,13 @@ DEBUG_CV_MIN_AREA_RATIO = 0.25
 # 이 값은 "절대 이 이상은 무조건 버림" 용도
 DEBUG_CV_FIXED_MAX_AREA = 0.0
 
-# y축 위치별 "블럭 1개 기준 면적"
-# y=0 부근   → 기준 면적 900
-# y=480 부근 → 기준 면적 5000
+# y축 위치별 "블럭 1개 기준 면적" (카메라 180° 재설치: y=0 쪽이 카메라에 가까워 크게 보임)
+# y=0 부근   → 기준 면적 5000
+# y=480 부근 → 기준 면적 900
 DEBUG_CV_AREA_Y_TOP = 0.0
 DEBUG_CV_AREA_Y_BOTTOM = 480.0
-DEBUG_CV_SINGLE_AREA_TOP = 900.0
-DEBUG_CV_SINGLE_AREA_BOTTOM = 5000.0
+DEBUG_CV_SINGLE_AREA_TOP = 5000.0
+DEBUG_CV_SINGLE_AREA_BOTTOM = 900.0
 
 # 큰 blob을 몇 개까지 추정할지
 DEBUG_CV_MAX_ESTIMATED_COUNT = 4

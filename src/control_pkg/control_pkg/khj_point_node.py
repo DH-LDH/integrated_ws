@@ -31,7 +31,7 @@ PUBLISH_HZ   = 0.5   # seconds
 # 버드아이뷰 probe(빨간 점) 기준 robot1 카메라 위치 (robot1 글로벌 좌표계)
 # 카메라는 probe에서 Y 음수 방향으로 14cm
 CAMERA_OFFSET_X_CM =   0.0
-CAMERA_OFFSET_Y_CM = -14.0
+CAMERA_OFFSET_Y_CM = -10.0
 
 
 class KhjPointNode(Node):
@@ -88,8 +88,8 @@ class KhjPointNode(Node):
                 matched[id_str] = {
                     "class_name": class_name,
                     "dist_cm":    self._dist_from_camera(offset),
-                    "offset_cm":  {"x": -round(offset.get("x", 0.0), 2),   # x 부호 반전
-                                   "y":  round(offset.get("y", 0.0), 2)},
+                    "offset_cm":  {"x":  round(offset.get("x", 0.0), 2),
+                                   "y":  round(offset.get("y", 0.0) - CAMERA_OFFSET_Y_CM, 2)},
                 }
 
         if matched:

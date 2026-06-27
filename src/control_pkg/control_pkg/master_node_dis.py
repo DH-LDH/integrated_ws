@@ -15,7 +15,7 @@ WAIT_TIME_DEFAULT     =   0.7   # 동작 간 일반 대기 시간 (s)
 GRIP_WAIT_DEFAULT     =   1.3   # 그리퍼 동작 후 안정화 대기 (s)
 INITIAL_LIFT_DEFAULT  = -20.0   # 그립 직후 초기 상승 거리 (mm, 음수=위로)
 PULL_UP_DEFAULT       = -30.0   # 강제 분리 추가 상승 거리 (mm, 음수=위로)
-WRIST_OFFSET_DEFAULT  =  90.0   # robot1 픽업 시 손목 추가 회전 각도 (deg)# 비전쪽에서 장축으로 넘겨줌
+WRIST_OFFSET_DEFAULT  =  0.0   # robot1 픽업 시 손목 추가 회전 각도 (deg)# 비전쪽에서 장축으로 넘겨줌
 BURGER_Y_MIN_DEFAULT  =   0.0   # 버거 4x2 빨강 Y필터 하한 (m) — assembly Y > DROP Y, 실측 후 조정
 # ============================================================
 
@@ -223,7 +223,6 @@ class BatteryDualDisassembly(Node):
         self.move_z(self.cli_r1, self.Z_MARGIN)     # 최종 수직 하강
         self.sleep()
         self.set_gripper(self.cli_g1, True)
-        self.sleep()
         self.move_z(self.cli_r1, self.INITIAL_LIFT)  # 초기 상승
         self.sleep()
         self.send_pose(self.cli_r1, "SEPARATION")
@@ -258,7 +257,6 @@ class BatteryDualDisassembly(Node):
         """robot2: 제자리에서 그리퍼 열고 홈 복귀"""
         self.get_logger().info(f"[RELEASE] robot2: {bottom_label}")
         self.set_gripper(self.cli_g2, False)
-        self.sleep()
         self.call(self.cli_h2, Trigger.Request())
         self.sleep()
         return True
@@ -271,7 +269,6 @@ class BatteryDualDisassembly(Node):
             return False
         self.sleep()
         self.set_gripper(self.cli_g1, False)
-        self.sleep()
         self.call(self.cli_h1, Trigger.Request())
         self.sleep()
         return True
@@ -284,7 +281,6 @@ class BatteryDualDisassembly(Node):
             return False
         self.sleep()
         self.set_gripper(self.cli_g1, False)
-        self.sleep()
         self.call(self.cli_h1, Trigger.Request())
         self.sleep()
         return True
@@ -297,7 +293,6 @@ class BatteryDualDisassembly(Node):
             return False
         self.sleep()
         self.set_gripper(self.cli_g2, False)
-        self.sleep()
         self.call(self.cli_h2, Trigger.Request())
         self.sleep()
         return True
@@ -459,33 +454,94 @@ class BatteryDualDisassembly(Node):
             (1, "2x4_yellow", "2x4 노랑"),
         ])
 
+    def _run_new_seq(self, name: str, top_target: str, top_label: str,
+                     mid_label: str, bot_label: str) -> bool:
+        """
+        신호등 시퀀스와 동일한 3층 분해 패턴.
+          robot1: 3층 픽업 → DROP
+          robot2: 2층 그립 → 대기 → DROP
+          robot1: 1층 그립(DROP_AFTER_GRIP) → DROP_AFTER_DROP
+        """
+        self.get_logger().info(f"{name} 분해 시작")
+        self.move_both_home_pose()
+        self.set_gripper(self.cli_g1, False)
+        self.set_gripper(self.cli_g2, False)
+
+        if not self.robot1_top_pick(top_target, top_label, expected_layer=3):
+            return False
+
+        if not self.robot2_side_hold(mid_label):
+            return False
+
+        if not self.robot1_pull_up(top_label):
+            return False
+
+        if not self.robot2_return_home_holding(mid_label):
+            return False
+
+        self.get_logger().info(f"[DROP] robot1: {top_label} → DROP → DROP_AFTER_HOME")
+        if not self.send_pose(self.cli_r1, "DROP"):
+            return False
+        self.sleep()
+        self.set_gripper(self.cli_g1, False)
+        if not self.send_pose(self.cli_r1, "DROP_AFTER_HOME"):
+            return False
+        self.sleep()
+
+        self.get_logger().info(f"[SEP] robot2: separation_joint 이동 ({mid_label} 그립 유지)")
+        if not self.send_pose(self.cli_r2, "SEPARATION"):
+            return False
+        self.sleep()
+
+        self.get_logger().info(f"[GRIP] robot1: drop_after_grip_joint → {bot_label} 그립")
+        if not self.send_pose(self.cli_r1, "DROP_AFTER_GRIP"):
+            return False
+        self.sleep()
+        self.set_gripper(self.cli_g1, True)
+
+        self.get_logger().info("[LIFT] robot2: Z 초기 상승 (Base)")
+        req_z = GetTargetPose.Request()
+        req_z.target_size = "Z_BASE"
+        req_z.z = -self.INITIAL_LIFT
+        self.call(self.cli_r2, req_z)
+        self.sleep()
+
+        self.get_logger().info("[MOVE] robot1: DROP_AFTER_HOME 이동")
+        if not self.send_pose(self.cli_r1, "DROP_AFTER_HOME"):
+            return False
+        self.sleep()
+
+        self.get_logger().info(f"[DROP] robot2: {mid_label} → DROP → HOME")
+        if not self.send_pose(self.cli_r2, "DROP"):
+            return False
+        self.sleep()
+        self.set_gripper(self.cli_g2, False)
+        self.call(self.cli_h2, Trigger.Request())
+        self.sleep()
+
+        self.get_logger().info(f"[DROP] robot1: {bot_label} → DROP_AFTER_DROP → HOME")
+        if not self.send_pose(self.cli_r1, "DROP_AFTER_DROP"):
+            return False
+        self.sleep()
+        self.set_gripper(self.cli_g1, False)
+        self.call(self.cli_h1, Trigger.Request())
+        self.sleep()
+
+        self.get_logger().info(f"[완료] {name}")
+        self.move_both_end_pose()
+        return True
+
     def run_carrot_once(self):
-        return self._run_layers("당근", [
-            (3, "2x2_green",  "2x2 초록"),
-            (2, "2x2_yellow", "2x2 노랑"),
-            (1, "2x2_yellow", "2x2 노랑"),
-        ])
+        return self._run_new_seq("당근", "2x2_green", "3층 초록", "2층 노랑", "1층 노랑")
 
     def run_small_tree_once(self):
-        return self._run_layers("작은 나무", [
-            (3, "2x2_green",  "2x2 초록"),
-            (2, "4x2_green",  "4x2 초록"),
-            (1, "2x2_yellow", "2x2 노랑"),
-        ])
+        return self._run_new_seq("작은 나무", "2x2_green", "3층 초록", "2층 4x2 초록", "1층 노랑")
 
     def run_traffic_light_once(self):
-        return self._run_layers("신호등", [
-            (3, "2x2_red",    "2x2 빨강"),
-            (2, "2x2_yellow", "2x2 노랑"),
-            (1, "2x2_green",  "2x2 초록"),
-        ])
+        return self._run_new_seq("신호등", "2x2_red", "3층 빨강", "2층 노랑", "1층 초록")
 
     def run_hammer_once(self):
-        return self._run_layers("망치", [
-            (3, "4x2_blue", "4x2 파랑"),
-            (2, "2x2_red",  "2x2 빨강"),
-            (1, "2x2_red",  "2x2 빨강"),
-        ])
+        return self._run_new_seq("망치", "4x2_blue", "3층 파랑", "2층 빨강", "1층 빨강")
 
     def run_big_carrot_once(self):
         return self._run_layers("큰 당근", [

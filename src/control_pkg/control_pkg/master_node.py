@@ -25,7 +25,7 @@ HOME_X_SEARCH_STEP_M_DEFAULT = 0.150
 
 # 정밀 재촬영 시, 대상 블록 중심에서 global y축 방향으로 이동할 거리.
 # 현재 기본값 +0.100m = global y축 +100mm 방향
-PRECISION_SCAN_GLOBAL_Y_OFFSET_DEFAULT = 0.200
+PRECISION_SCAN_GLOBAL_Y_OFFSET_DEFAULT = -0.100
 
 # 처음 인식한 pose.x가 음수인 블록만 정밀 재촬영 위치를 추가 보정할지 여부
 NEGATIVE_X_SCAN_EXTRA_ENABLE_DEFAULT = True
@@ -719,17 +719,15 @@ class MasterNode(Node):
         ox = float(offset_cm.get("x", 0.0))
         oy = float(offset_cm.get("y", 0.0))
 
-        # [실측 확인] 로봇1=남쪽, 버드아이=서쪽 기준:
-        #   offset_cm.x → robot_x (동일 부호)
-        #   offset_cm.y → robot_y (부호 반전)
-        robot_x =  ox * self.KHJ_X_TO_ROBOT_X
+        # 세션 이전 부호 그대로 유지
+        robot_x = ox * self.KHJ_X_TO_ROBOT_X
         robot_y = -oy * self.KHJ_Y_TO_ROBOT_Y
 
         self.get_logger().info(
             f"[KHJ] '{class_name}' local_id={local_id}: "
             f"offset_cm=({ox:.2f}, {oy:.2f}) → "
             f"robot_x=ox*{self.KHJ_X_TO_ROBOT_X:.5f}={robot_x:.4f}m, "
-            f"robot_y=-oy*{self.KHJ_Y_TO_ROBOT_Y:.5f}={robot_y:.4f}m"
+            f"robot_y=oy*{self.KHJ_Y_TO_ROBOT_Y:.5f}={robot_y:.4f}m"
         )
         return robot_x, robot_y
 
@@ -1570,8 +1568,9 @@ class MasterNode(Node):
 
         if self.visual_insert(
             "2x2_red",
-            layer_index=0.7,
+            layer_index=0.63,
             release_gripper=False,
+            offset_studs_y= -0.18,#몸쪽으로 음수, 바깥쪽으로 양수
             pre_khj_scan=True,
             local_id=0,
         ):
@@ -1583,7 +1582,7 @@ class MasterNode(Node):
 
             if self.visual_insert(
                 "2x2_red",
-                layer_index=1.6,
+                layer_index=1.8,
                 pre_khj_scan=True,
                 local_id=1,
             ):

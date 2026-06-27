@@ -235,8 +235,8 @@ import numpy as np
 ROBOT_CONFIGS = {
     "robot1": {
         "ip": "10.0.2.7",
-        "cam_x_off": -51.5, # 바깥으로 가고싶으면 음수, 몸쪽으로 오고 싶으면 양수
-        "cam_y_off": 29.485, #32.485
+        "cam_x_off": -52.5, # 바깥으로 가고싶으면 음수, 몸쪽으로 오고 싶으면 양수
+        "cam_y_off": -34.485, #-29.485, #32.485
         "home_joint": [-90.0, 6.67, 35.34, 0.0, 138.0, 0.0],
         "end_joint": [-90.0, -65.0, 110.0, 0.0, 140.0, 0.0],
         "center_joint": [-108.2, -10.14, 104.67, 0.0, 85.48, -18.2],
@@ -249,6 +249,10 @@ ROBOT_CONFIGS = {
         "assembly_drop_joint_s": [-157.95, 0.71, 112.47, 61.43, 59.02, -188.06],
         "assembly_drop_joint_m": [-157.95, -0.30, 111.25, 60.29, 60.10, -185.80],
         "assembly_drop_joint_l": [-157.95, -0.71, 110.69, 59.81, 60.58, -184.84],
+        "drop_after_home_joint": [-90.70, -103.8, 144.2, 2.59, 51.69, -4.05],
+        "drop_after_grip_joint": [-91.17, -56.46, 142.27, 1.13, 4.65, -4.05],
+        "drop_after_drop_joint": [-100.02, -16.63, 141.86, 6.93, -15.10, -10.03],
+
     },
     "robot2": {
         "ip": "10.0.2.8",
@@ -299,6 +303,9 @@ class DualRobotNode(Node):
                 "assembly_drop_joint_s": np.array(cfg.get("assembly_drop_joint_s", cfg["home_joint"]), dtype=float),
                 "assembly_drop_joint_m": np.array(cfg.get("assembly_drop_joint_m", cfg["home_joint"]), dtype=float),
                 "assembly_drop_joint_l": np.array(cfg.get("assembly_drop_joint_l", cfg["home_joint"]), dtype=float),
+                "drop_after_home_joint": np.array(cfg.get("drop_after_home_joint", cfg["home_joint"]), dtype=float),
+                "drop_after_grip_joint": np.array(cfg.get("drop_after_grip_joint", cfg["home_joint"]), dtype=float),
+                "drop_after_drop_joint": np.array(cfg.get("drop_after_drop_joint", cfg["home_joint"]), dtype=float),
                 "last_target": None,
             }
 
@@ -374,8 +381,8 @@ class DualRobotNode(Node):
                 self.wait_move(robot_name, "YAW")
 
             elif req.target_size == "XY":
-                dx = -(req.x * 1000.0) + handle["cam_y_off"]
-                dy = (req.y * 1000.0) + handle["cam_x_off"]
+                dx = (req.x * 1000.0)
+                dy = -(req.y * 1000.0)
                 pose = np.array([dy, dx, 0, 0, 0, 0], dtype=float)
                 self.get_logger().info(
                     f"[{robot_name}][XY] req=(x={req.x*1000:.1f}mm, y={req.y*1000:.1f}mm) "
@@ -393,8 +400,8 @@ class DualRobotNode(Node):
                 # 조립 마스터(master_node)용: YAW + XY + Z 한 모션 접근
                 # move_l_rel(Tool)의 병진은 이동 시작 프레임 기준으로 적용되고,
                 # rz(yaw)는 tool Z축 방향을 바꾸지 않으므로 dx/dy/z/yaw를 한 번에 합쳐도 된다.
-                dx = -(req.x * 1000.0) + handle["cam_y_off"]
-                dy = (req.y * 1000.0) + handle["cam_x_off"]
+                dx = (req.x * 1000.0) + handle["cam_y_off"]
+                dy = -(req.y * 1000.0) + handle["cam_x_off"]
                 pose = np.array([dy, dx, req.z, 0, 0, req.yaw], dtype=float)
                 self.get_logger().info(
                     f"[{robot_name}][APPROACH] req=(x={req.x*1000:.1f}mm, y={req.y*1000:.1f}mm, "
@@ -409,8 +416,8 @@ class DualRobotNode(Node):
                 # 이미 APPROACH로 스캔 위치까지 이동(cam 오프셋 1회 적용)한 상태이고,
                 # master가 (목표 - 스캔) delta를 미리 계산해 넘기므로 cam 오프셋은 상쇄됨.
                 # -> APPROACH와 동일하되 cam_x_off / cam_y_off 를 다시 더하지 않는다.
-                dx = -(req.x * 1000.0)
-                dy = (req.y * 1000.0)
+                dx = (req.x * 1000.0)
+                dy = -(req.y * 1000.0)
                 pose = np.array([dy, dx, req.z, 0, 0, req.yaw], dtype=float)
                 robot.move_l_rel(rc, pose, self.L_VEL, self.L_ACC, rb.ReferenceFrame.Tool)
                 self.wait_move(robot_name, f"APPROACH_DELTA(yaw={req.yaw:.1f})")
@@ -474,6 +481,23 @@ class DualRobotNode(Node):
             elif req.target_size == "ASSEMBLY_DROP_L":
                 robot.move_j(rc, handle["assembly_drop_joint_l"], 255, 255)
                 self.wait_move(robot_name, "ASSEMBLY_DROP_L")
+
+            elif req.target_size == "DROP_AFTER_HOME":
+                robot.move_j(rc, handle["drop_after_home_joint"], 255, 255)
+                self.wait_move(robot_name, "DROP_AFTER_HOME")
+
+            elif req.target_size == "DROP_AFTER_GRIP":
+                robot.move_j(rc, handle["drop_after_grip_joint"], 255, 255)
+                self.wait_move(robot_name, "DROP_AFTER_GRIP")
+
+            elif req.target_size == "DROP_AFTER_DROP":
+                robot.move_j(rc, handle["drop_after_drop_joint"], 255, 255)
+                self.wait_move(robot_name, "DROP_AFTER_DROP")
+
+            elif req.target_size == "Z_BASE":
+                pose = np.array([0, 0, req.z, 0, 0, 0], dtype=float)
+                robot.move_l_rel(rc, pose, self.L_VEL, self.L_ACC, rb.ReferenceFrame.Base)
+                self.wait_move(robot_name, f"Z_BASE({req.z:.1f})")
 
             else:
                 self.get_logger().error(f"{robot_name} unknown target_size: {req.target_size}")

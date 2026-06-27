@@ -100,8 +100,8 @@ class VisionNode(Node):
                     'bbox_xyxy': [float(x1), float(y1), float(x2), float(y2)],
                 })
 
-            # X 픽셀 오름차순 정렬 → ID 1 = 가장 왼쪽
-            raw.sort(key=lambda b: b['x_px'])
+            # X 픽셀 내림차순 정렬 → ID 1 = 가장 오른쪽 (카메라 180° 재설치)
+            raw.sort(key=lambda b: b['x_px'], reverse=True)
             self._blocks = [
                 {'x_mm': b['x_px'], 'class_name': b['class_name']}
                 for b in raw

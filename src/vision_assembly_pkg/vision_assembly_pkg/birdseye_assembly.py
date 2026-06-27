@@ -16,20 +16,20 @@ IMAGE_TOPIC     = "/camera/camera/color/image_raw"
 SUMMARY_TOPIC   = "/decision_assembly/summary"
 POSITIONS_TOPIC = "/birdseye_assembly/object_positions"
 
-# decision_assembly.py의 ROI polygon 그대로 사용 (좌상→우상→우하→좌하)
-ROI_POLYGON = [(234, 0), (478, 0), (640, 480), (90, 480)]
+# decision_assembly.py의 ROI polygon 그대로 사용 (좌상→우상→우하→좌하) (카메라 180° 재설치 기준)
+ROI_POLYGON = [(24, 0), (572, 0), (423, 480), (155, 480)]
 
 # 버드뷰 출력 해상도
 BIRD_W = 500
 BIRD_H = 600
 
-# image_raw 상의 중앙점 (probe) 픽셀
-PROBE_PIXEL = (553, 233)
+# image_raw 상의 중앙점 (probe) 픽셀 (카메라 180° 재설치 후 실측)
+PROBE_PIXEL = (110, 252)
 
 # ── 실제 거리 스케일 ─────────────────────────────────────────────
-# 좌상→우상: 38 cm  /  좌상→좌하: 74 cm
+# 좌상→우상: 38 cm  /  좌상→좌하: 65.5 cm
 ROI_REAL_W_CM = 38.0
-ROI_REAL_H_CM = 74.0
+ROI_REAL_H_CM = 65.5
 CM_PER_PX_X   = ROI_REAL_W_CM / BIRD_W   # 0.076  cm/px
 CM_PER_PX_Y   = ROI_REAL_H_CM / BIRD_H   # 0.1233 cm/px
 
@@ -206,9 +206,9 @@ class BirdseyeAssemblyNode(Node):
         self.get_logger().info(
             f"[BIRDSEYE] scale  x={CM_PER_PX_X:.4f} cm/px  y={CM_PER_PX_Y:.4f} cm/px"
         )
-        dist_check = real_dist_cm((BIRD_W, 0), self.probe_bird)
+        dist_check = real_dist_cm((0, BIRD_H), self.probe_bird)
         self.get_logger().info(
-            f"[BIRDSEYE] 우상→중앙점 계산 거리: {dist_check:.1f} cm  (실측 50.0 cm)"
+            f"[BIRDSEYE] 좌하→중앙점 계산 거리: {dist_check:.1f} cm  (실측 42.5 cm)"
         )
 
     # ── 콜백 ──────────────────────────────────────────────────────
@@ -256,10 +256,10 @@ class BirdseyeAssemblyNode(Node):
                 bx, by = project_point((cx_raw, cy_raw), self.H)
                 dist   = real_dist_cm((bx, by), self.probe_bird)
 
-                # robot1 좌표계 기준 offset.
-                # robot1이 북쪽, birdseye/camera2 기준이 동쪽을 본다고 보고 축을 90도 맞춘다.
-                # birdseye y가 커지는 방향 -> robot1 x 양수, birdseye x가 커지는 방향 -> robot1 y 음수.
-                offset_x_cm = (by - py_probe) * CM_PER_PX_Y
+                # robot1 글로벌 좌표계 기준 offset.
+                # 픽셀 x 증가 → robot1 글로벌 Y 감소
+                # 픽셀 y 증가 → robot1 글로벌 X 감소
+                offset_x_cm = -(by - py_probe) * CM_PER_PX_Y
                 offset_y_cm = -(bx - px_probe) * CM_PER_PX_X
 
                 raw_proj.append({
@@ -269,8 +269,8 @@ class BirdseyeAssemblyNode(Node):
                     "offset_cm":   {"x": round(offset_x_cm, 2), "y": round(offset_y_cm, 2)},
                 })
 
-        # 픽셀 Y 내림차순 정렬 후 ID 부여 (y 큰 것 = 카메라에 가까운 것 = #1)
-        raw_proj.sort(key=lambda p: p["center_bird"][1], reverse=True)
+        # 픽셀 Y 오름차순 정렬 후 ID 부여 (카메라 180° 재설치: y 작은 것 = 카메라에 가까운 것 = #1)
+        raw_proj.sort(key=lambda p: p["center_bird"][1], reverse=False)
         proj_list = [{**p, "id": i + 1} for i, p in enumerate(raw_proj)]
 
         # 위치 토픽 발행
