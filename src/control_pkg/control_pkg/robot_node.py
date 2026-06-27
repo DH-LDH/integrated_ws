@@ -325,8 +325,8 @@ class DualRobotNode(Node):
                 f"services=/{robot_name}/robot_home, /{robot_name}/robot_move_step"
             )
 
-        self.L_VEL = 500
-        self.L_ACC = 800
+        self.L_VEL = 700
+        self.L_ACC = 1500
         self.get_logger().info("Dual Robot Node Ready")
 
     def wait_move(self, robot_name, name="MOVE"):

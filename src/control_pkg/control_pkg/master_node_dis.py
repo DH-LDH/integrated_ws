@@ -11,10 +11,10 @@ Z_OFF_DEFAULT         = -95.0   # 비전 Z → 엔드이펙터 Z 변환 오프�
 Z_MARGIN_DEFAULT      =  20.0   # 블록 접근 전 안전 여유 거리 (mm)
 BLOCK_H_DEFAULT       =  16.0   # 레고 블록 한 층 높이 실측값 (mm)
 LAYER_IDX_OFFSET      =   1.5   # 층 인덱스 보정 오프셋 — assembly 실측값 기준 (1층→0.6, 2층→1.6, 3층→2.6)
-WAIT_TIME_DEFAULT     =   0.7   # 동작 간 일반 대기 시간 (s)
-GRIP_WAIT_DEFAULT     =   1.3   # 그리퍼 동작 후 안정화 대기 (s)
-INITIAL_LIFT_DEFAULT  = -20.0   # 그립 직후 초기 상승 거리 (mm, 음수=위로)
-PULL_UP_DEFAULT       = -30.0   # 강제 분리 추가 상승 거리 (mm, 음수=위로)
+WAIT_TIME_DEFAULT     =   0.5  # 동작 간 일반 대기 시간 (s)
+GRIP_WAIT_DEFAULT     =   0.7   # 그리퍼 동작 후 안정화 대기 (s)
+INITIAL_LIFT_DEFAULT  = -20.0   # 그립 직후 초기 상승 거리 (mm, 음수=위로) # 로봇 2
+PULL_UP_DEFAULT       = -30.0   # 강제 분리 추가 상승 거리 (mm, 음수=위로) # 로봇 1
 WRIST_OFFSET_DEFAULT  =  0.0   # robot1 픽업 시 손목 추가 회전 각도 (deg)# 비전쪽에서 장축으로 넘겨줌
 BURGER_Y_MIN_DEFAULT  =   0.0   # 버거 4x2 빨강 Y필터 하한 (m) — assembly Y > DROP Y, 실측 후 조정
 # ============================================================
@@ -75,6 +75,11 @@ class BatteryDualDisassembly(Node):
         res = self.call(cli, SetBool.Request(data=closed))
         time.sleep(self.GRIP_WAIT)
         return res.success
+
+    def set_gripper1(self, closed: bool) -> bool:
+        """그리퍼1 전용: sleep 없이 서비스 응답 성공 여부로 즉시 반환"""
+        res = self.call(self.cli_g1, SetBool.Request(data=closed))
+        return res is not None and res.success
 
     def move_z(self, cli, dz_mm: float) -> bool:
         req = GetTargetPose.Request()
@@ -176,7 +181,6 @@ class BatteryDualDisassembly(Node):
         self.get_logger().info("양쪽 로봇 HOME")
         self.call(self.cli_h1, Trigger.Request())
         self.call(self.cli_h2, Trigger.Request())
-        self.sleep()
         return True
 
     def move_both_end_pose(self):
@@ -218,15 +222,12 @@ class BatteryDualDisassembly(Node):
         req.z   = z_approach
         req.yaw = target_yaw
         self.call(self.cli_r1, req)
-        self.sleep()
 
         self.move_z(self.cli_r1, self.Z_MARGIN)     # 최종 수직 하강
-        self.sleep()
-        self.set_gripper(self.cli_g1, True)
-        self.move_z(self.cli_r1, self.INITIAL_LIFT)  # 초기 상승
-        self.sleep()
+        if not self.set_gripper1(True):
+            self.get_logger().error("[PICK] 그리퍼1 파지 실패")
+            return False
         self.send_pose(self.cli_r1, "SEPARATION")
-        self.sleep()
         return True
 
     def robot2_side_hold(self, bottom_label: str) -> bool:
@@ -235,7 +236,6 @@ class BatteryDualDisassembly(Node):
         if not self.send_pose(self.cli_r2, "SEPARATION"):
             self.get_logger().error("robot2: SEPARATION 실패")
             return False
-        self.sleep()
         self.set_gripper(self.cli_g2, True)
         return True
 
@@ -250,7 +250,6 @@ class BatteryDualDisassembly(Node):
         """robot2: 블록 잡은 상태로 홈 복귀"""
         self.get_logger().info(f"[HOME] robot2 블록 잡고 홈: {bottom_label}")
         self.call(self.cli_h2, Trigger.Request())
-        self.sleep()
         return True
 
     def robot2_release_and_home(self, bottom_label: str) -> bool:
@@ -258,7 +257,6 @@ class BatteryDualDisassembly(Node):
         self.get_logger().info(f"[RELEASE] robot2: {bottom_label}")
         self.set_gripper(self.cli_g2, False)
         self.call(self.cli_h2, Trigger.Request())
-        self.sleep()
         return True
 
     def robot1_place_top_at_center_and_home(self, top_label: str) -> bool:
@@ -268,7 +266,7 @@ class BatteryDualDisassembly(Node):
             self.get_logger().error("robot1: CENTER 실패")
             return False
         self.sleep()
-        self.set_gripper(self.cli_g1, False)
+        self.set_gripper1(False)
         self.call(self.cli_h1, Trigger.Request())
         self.sleep()
         return True
@@ -280,7 +278,7 @@ class BatteryDualDisassembly(Node):
             self.get_logger().error(f"robot1: {drop_slot} 실패")
             return False
         self.sleep()
-        self.set_gripper(self.cli_g1, False)
+        self.set_gripper1(False)
         self.call(self.cli_h1, Trigger.Request())
         self.sleep()
         return True
@@ -294,7 +292,6 @@ class BatteryDualDisassembly(Node):
         self.sleep()
         self.set_gripper(self.cli_g2, False)
         self.call(self.cli_h2, Trigger.Request())
-        self.sleep()
         return True
 
     # ── 복합 시퀀스 ──────────────────────────────────────────
@@ -382,7 +379,7 @@ class BatteryDualDisassembly(Node):
 
         self.get_logger().info(f"{name} 2층 분해 시작: {top_label} / {bot_label}")
         self.move_both_home_pose()
-        self.set_gripper(self.cli_g1, False)
+        self.set_gripper1(False)
         self.set_gripper(self.cli_g2, False)
 
         if not self.robot1_top_pick(top_target, top_label, expected_layer=2, yaw_offset=yaw_offset):
@@ -410,7 +407,7 @@ class BatteryDualDisassembly(Node):
         """
         self.get_logger().info(f"{name} {len(layers)}층 분해 시작")
         self.move_both_home_pose()
-        self.set_gripper(self.cli_g1, False)
+        self.set_gripper1(False)
         self.set_gripper(self.cli_g2, False)
 
         auto_slots = ["DROP" if i == 0 else f"DROP{i + 1}" for i in range(len(layers))]
@@ -464,7 +461,7 @@ class BatteryDualDisassembly(Node):
         """
         self.get_logger().info(f"{name} 분해 시작")
         self.move_both_home_pose()
-        self.set_gripper(self.cli_g1, False)
+        self.set_gripper1(False)
         self.set_gripper(self.cli_g2, False)
 
         if not self.robot1_top_pick(top_target, top_label, expected_layer=3):
@@ -482,11 +479,9 @@ class BatteryDualDisassembly(Node):
         self.get_logger().info(f"[DROP] robot1: {top_label} → DROP → DROP_AFTER_HOME")
         if not self.send_pose(self.cli_r1, "DROP"):
             return False
-        self.sleep()
-        self.set_gripper(self.cli_g1, False)
+        self.set_gripper1(False)
         if not self.send_pose(self.cli_r1, "DROP_AFTER_HOME"):
             return False
-        self.sleep()
 
         self.get_logger().info(f"[SEP] robot2: separation_joint 이동 ({mid_label} 그립 유지)")
         if not self.send_pose(self.cli_r2, "SEPARATION"):
@@ -496,36 +491,30 @@ class BatteryDualDisassembly(Node):
         self.get_logger().info(f"[GRIP] robot1: drop_after_grip_joint → {bot_label} 그립")
         if not self.send_pose(self.cli_r1, "DROP_AFTER_GRIP"):
             return False
-        self.sleep()
-        self.set_gripper(self.cli_g1, True)
+        if not self.set_gripper1(True):
+            self.get_logger().error("[GRIP] 그리퍼1 파지 실패 (bot)")
+            return False
 
         self.get_logger().info("[LIFT] robot2: Z 초기 상승 (Base)")
         req_z = GetTargetPose.Request()
         req_z.target_size = "Z_BASE"
         req_z.z = -self.INITIAL_LIFT
         self.call(self.cli_r2, req_z)
-        self.sleep()
 
         self.get_logger().info("[MOVE] robot1: DROP_AFTER_HOME 이동")
         if not self.send_pose(self.cli_r1, "DROP_AFTER_HOME"):
             return False
-        self.sleep()
 
         self.get_logger().info(f"[DROP] robot2: {mid_label} → DROP → HOME")
         if not self.send_pose(self.cli_r2, "DROP"):
             return False
-        self.sleep()
         self.set_gripper(self.cli_g2, False)
         self.call(self.cli_h2, Trigger.Request())
-        self.sleep()
 
-        self.get_logger().info(f"[DROP] robot1: {bot_label} → DROP_AFTER_DROP → HOME")
+        self.get_logger().info(f"[DROP] robot1: {bot_label} → DROP_AFTER_DROP → END")
         if not self.send_pose(self.cli_r1, "DROP_AFTER_DROP"):
             return False
-        self.sleep()
-        self.set_gripper(self.cli_g1, False)
-        self.call(self.cli_h1, Trigger.Request())
-        self.sleep()
+        self.set_gripper1(False)
 
         self.get_logger().info(f"[완료] {name}")
         self.move_both_end_pose()
@@ -555,7 +544,7 @@ class BatteryDualDisassembly(Node):
         """버거: 3층=4x2노랑 / 2층=2x2빨강→4x2빨강(Y필터) / 1층=4x2노랑"""
         self.get_logger().info("버거 분해 시작")
         self.move_both_home_pose()
-        self.set_gripper(self.cli_g1, False)
+        self.set_gripper1(False)
         self.set_gripper(self.cli_g2, False)
 
         steps = [
@@ -583,7 +572,7 @@ class BatteryDualDisassembly(Node):
     def run_ice_cream_once(self):
         self.get_logger().info("아이스크림 5층 분해 시작")
         self.move_both_home_pose()
-        self.set_gripper(self.cli_g1, False)
+        self.set_gripper1(False)
         self.set_gripper(self.cli_g2, False)
 
         steps = [
@@ -615,7 +604,7 @@ class BatteryDualDisassembly(Node):
         """큰 나무: 비표준 순서가 필요한 특수 시퀀스"""
         self.get_logger().info("큰 나무 특수 분해 시작")
         self.move_both_home_pose()
-        self.set_gripper(self.cli_g1, False)
+        self.set_gripper1(False)
         self.set_gripper(self.cli_g2, False)
 
         steps = [
