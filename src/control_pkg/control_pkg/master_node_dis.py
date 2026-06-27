@@ -7,10 +7,10 @@ from std_srvs.srv import SetBool, Trigger
 # ============================================================
 # 조정 가능 파라미터 (ROS 파라미터로도 오버라이드 가능)
 # ============================================================
-Z_OFF_DEFAULT         = -95.0   # 비전 Z → 엔드이펙터 Z 변환 오프셋 (mm)
+Z_OFF_DEFAULT         = -85.0   # 비전 Z → 엔드이펙터 Z 변환 오프셋 (mm)
 Z_MARGIN_DEFAULT      =  20.0   # 블록 접근 전 안전 여유 거리 (mm)
-BLOCK_H_DEFAULT       =  16.0   # 레고 블록 한 층 높이 실측값 (mm)
-LAYER_IDX_OFFSET      =   1.5   # 층 인덱스 보정 오프셋 — assembly 실측값 기준 (1층→0.6, 2층→1.6, 3층→2.6)
+BLOCK_H_DEFAULT       =  18.0   # 레고 블록 한 층 높이 실측값 (mm)
+LAYER_IDX_OFFSET      =  99.0   # 1.5 층 인덱스 보정 오프셋 — assembly 실측값 기준 (1층→0.6, 2층→1.6, 3층→2.6)
 WAIT_TIME_DEFAULT     =   0.5  # 동작 간 일반 대기 시간 (s)
 GRIP_WAIT_DEFAULT     =   0.7   # 그리퍼 동작 후 안정화 대기 (s)
 INITIAL_LIFT_DEFAULT  = -20.0   # 그립 직후 초기 상승 거리 (mm, 음수=위로) # 로봇 2
@@ -25,7 +25,7 @@ class BatteryDualDisassembly(Node):
         super().__init__(node_name)
 
         # 서비스 클라이언트
-        self.cli_v1 = self.create_client(GetTargetPose, "/get_target_pose")
+        self.cli_v_dis = self.create_client(GetTargetPose, "/get_target_pose_dis")
         self.cli_r1 = self.create_client(GetTargetPose, "/robot1/robot_move_step")
         self.cli_r2 = self.create_client(GetTargetPose, "/robot2/robot_move_step")
         self.cli_h1 = self.create_client(Trigger, "/robot1/robot_home")
@@ -109,7 +109,7 @@ class BatteryDualDisassembly(Node):
         req.target_color = tid
 
         self.get_logger().info(f"비전 요청: {name} (id={tid})")
-        p = self.call(self.cli_v1, req)
+        p = self.call(self.cli_v_dis, req)
 
         if p is None:
             self.get_logger().error(f"비전 응답 없음: {name}")
