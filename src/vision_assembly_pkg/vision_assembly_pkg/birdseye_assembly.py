@@ -11,25 +11,23 @@ from sensor_msgs.msg import Image
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
 
+from vision_assembly_pkg.shared_config import ROI_POLYGON
 
 IMAGE_TOPIC     = "/camera/camera/color/image_raw"
 SUMMARY_TOPIC   = "/decision_assembly/summary"
 POSITIONS_TOPIC = "/birdseye_assembly/object_positions"
-
-# decision_assembly.py의 ROI polygon 그대로 사용 (좌상→우상→우하→좌하) (카메라 180° 재설치 기준)
-ROI_POLYGON = [(24, 0), (572, 0), (423, 480), (155, 480)]
 
 # 버드뷰 출력 해상도
 BIRD_W = 500
 BIRD_H = 600
 
 # image_raw 상의 중앙점 (probe) 픽셀 (카메라 180° 재설치 후 실측)
-PROBE_PIXEL = (110, 252)
+PROBE_PIXEL = (125, 255)
 
 # ── 실제 거리 스케일 ─────────────────────────────────────────────
 # 좌상→우상: 38 cm  /  좌상→좌하: 65.5 cm
 ROI_REAL_W_CM = 38.0
-ROI_REAL_H_CM = 65.5
+ROI_REAL_H_CM = 73.5
 CM_PER_PX_X   = ROI_REAL_W_CM / BIRD_W   # 0.076  cm/px
 CM_PER_PX_Y   = ROI_REAL_H_CM / BIRD_H   # 0.1233 cm/px
 
@@ -196,6 +194,9 @@ class BirdseyeAssemblyNode(Node):
         self.lock_srv = self.create_service(
             Trigger, '/lock_positions', self._lock_cb
         )
+        self.unlock_srv = self.create_service(
+            Trigger, '/unlock_positions', self._unlock_cb
+        )
 
         self.get_logger().info(f"[BIRDSEYE] image    : {IMAGE_TOPIC}")
         self.get_logger().info(f"[BIRDSEYE] summary  : {SUMMARY_TOPIC}")
@@ -222,6 +223,16 @@ class BirdseyeAssemblyNode(Node):
         )
         response.success = True
         response.message = f'locked with {len(self.latest_detections)} objects'
+        return response
+
+    def _unlock_cb(self, request, response):
+        """새 명령 시작 시 호출 → 동결 해제, 최신 detections 갱신 재개."""
+        self._locked = False
+        self.latest_detections = []
+        self.total_blocks = 0
+        self.get_logger().info('[BIRDSEYE] 위치 데이터 동결 해제 (초기화 완료)')
+        response.success = True
+        response.message = 'unlocked'
         return response
 
     def summary_cb(self, msg):

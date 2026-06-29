@@ -20,6 +20,7 @@ from rclpy.executors import MultiThreadedExecutor
 
 from std_srvs.srv import Trigger, SetBool
 from sml_msgs.action import WbTask
+from srvs_pkg.srv import GetTargetPose
 
 # ──────────────────────────────────────────────────────────
 # 통합 ws 패키지: control_pkg
@@ -120,9 +121,16 @@ class WbCommandNode(Node):
         def sync_call(cli, req):
             while not cli.wait_for_service(timeout_sec=1.0):
                 node.get_logger().info(f'Waiting for {cli.srv_name}...')
+            node.get_logger().info(f'[sync_call] → {cli.srv_name}')
             future = cli.call_async(req)
+            elapsed = 0.0
             while rclpy.ok() and not future.done():
                 time.sleep(0.005)
+                elapsed += 0.005
+                if elapsed % 5.0 < 0.005:
+                    node.get_logger().warn(
+                        f'[sync_call] {cli.srv_name} 응답 대기 중 ({elapsed:.0f}s)...')
+            node.get_logger().info(f'[sync_call] ✓ {cli.srv_name} ({elapsed:.2f}s)')
             return future.result()
         node.call = sync_call
 
@@ -178,20 +186,38 @@ class WbCommandNode(Node):
         goal_handle.publish_feedback(fb)
 
         a = self.assembler
-        # 시작 상태 초기화 (master_node.run() 시작부와 동일): robot1 HOME + robot2 assembly_joint + 그리퍼 열기
+        # 시작 상태 초기화: robot1 HOME + robot2 assembly_joint + 그리퍼1,2 open 동시
         a.assembly_completed = False
         a.post_action_home_done = False
+        a.precision_scan_failed = False
+        a.current_floor_count_at_home = None
+        a.current_insert_start_count = None
+        a.current_insert_verify_after_time = None
 
-        home_res = a.call(a.cli_h, Trigger.Request())
+        for cli in (a.cli_h, a.cli_r2, a.cli_g, a.cli_g2):
+            while not cli.wait_for_service(timeout_sec=1.0):
+                a.get_logger().info(f"Waiting for {cli.srv_name}...")
+
+        future_h  = a.cli_h.call_async(Trigger.Request())
+        future_r2 = a.cli_r2.call_async(GetTargetPose.Request(target_size="ASSEMBLY_JOINT"))
+        future_g  = a.cli_g.call_async(SetBool.Request(data=False))
+        future_g2 = a.cli_g2.call_async(SetBool.Request(data=False))
+
+        while rclpy.ok() and not (
+            future_h.done() and future_r2.done()
+            and future_g.done() and future_g2.done()
+        ):
+            time.sleep(0.005)
+
+        home_res = future_h.result()
         if home_res is None or not home_res.success:
             return False, 'ASSEMBLY_HOME_FAILED'
 
-        assembly_res = a.move_robot2_assembly_joint()
+        assembly_res = future_r2.result()
         if assembly_res is None or not assembly_res.success:
             return False, 'ROBOT2_ASSEMBLY_JOINT_FAILED'
 
-        a.call(a.cli_g, SetBool.Request(data=False))
-        time.sleep(1.0)
+        time.sleep(0.5)
 
         # 조립 시작 전: 로봇1&2 HOME 정렬 완료 후 전체 블록 스캔 + birdseye 동결
         a.scan_all_blocks_at_home()
@@ -205,17 +231,25 @@ class WbCommandNode(Node):
             if drop_type:
                 a.drop_assembly(drop_type)
 
-        # 마무리: HOME 복귀 + 그리퍼 열기
+        # 마무리: HOME 복귀 + 그리퍼 열기 + robot1/2 동시 END
         a.call(a.cli_h, Trigger.Request())
         time.sleep(1.0)
         a.call(a.cli_g, SetBool.Request(data=False))
         time.sleep(a.WAIT_TIME)
-        a.move_robot_end()
-        robot2_end_res = a.move_robot2_end()
-        if robot2_end_res is None or not robot2_end_res.success:
+
+        future_e1 = a.cli_r.call_async(GetTargetPose.Request(target_size="END"))
+        future_e2 = a.cli_r2.call_async(GetTargetPose.Request(target_size="END"))
+        while rclpy.ok() and not (future_e1.done() and future_e2.done()):
+            time.sleep(0.005)
+
+        end_res2 = future_e2.result()
+        if end_res2 is None or not end_res2.success:
             return False, 'ROBOT2_END_FAILED'
 
-        # build_* 계열은 반환값이 없어(성공/실패 미구분) 예외만 없으면 성공으로 본다.
+        if a.precision_scan_failed:
+            return False, 'PRECISION_SCAN_FAILED'
+        if not a.assembly_completed:
+            return False, 'ASSEMBLY_INCOMPLETE'
         return True, ''
 
     # ──────────────────────────────────────────────────────

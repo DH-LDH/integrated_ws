@@ -235,9 +235,12 @@ import numpy as np
 ROBOT_CONFIGS = {
     "robot1": {
         "ip": "10.0.2.7",
-        "cam_x_off": -52.5, # 바깥으로 가고싶으면 음수, 몸쪽으로 오고 싶으면 양수
-        "cam_y_off": -34.485, #-29.485, #32.485
+        "cam_x_off": -65.152, # 조립용
+        "cam_y_off": -34.078, # 조립용
+        "dis_cam_x_off": -52.5, # 바깥으로 가고싶으면 음수, 몸쪽으로 오고 싶으면 양수
+        "dis_cam_y_off": -34.485, #-29.485, #32.485
         "home_joint": [-90.0, 6.67, 35.34, 0.0, 138.0, 0.0],
+        "end_joint": [-90.0, -65.0, 110.0, 0.0, 140.0, 0.0],
         "end_joint": [-90.0, -65.0, 110.0, 0.0, 140.0, 0.0],
         "center_joint": [-108.2, -10.14, 104.67, 0.0, 85.48, -18.2],
         "separation_joint": [-91.02, 21.07, 26.68, 0.11, 131.03, -91.23],
@@ -250,7 +253,7 @@ ROBOT_CONFIGS = {
         "assembly_drop_joint_m": [-157.95, -0.30, 111.25, 60.29, 60.10, -185.80],
         "assembly_drop_joint_l": [-157.95, -0.71, 110.69, 59.81, 60.58, -184.84],
         "drop_after_home_joint": [-90.70, -103.8, 144.2, 2.59, 51.69, -4.05],
-        "drop_after_grip_joint": [-91.17, -56.46, 142.27, 1.13, 4.65, -4.05],
+        "drop_after_grip_joint": [-90.4, -57.11, 142.24, 9.11, 4.71, -12.0],
         "drop_after_drop_joint": [-100.02, -16.63, 141.86, 6.93, -15.10, -10.03],
 
     },
@@ -258,15 +261,18 @@ ROBOT_CONFIGS = {
         "ip": "10.0.2.8",
         "cam_x_off": -53.0,
         "cam_y_off": 51.0, 
+        "dis_cam_x_off": -53.0,
+        "dis_cam_y_off": 51.0,
         "home_joint": [-90.0, -94.0, 147.7, 0.0, 35.6, 0.0],
         "end_joint": [-90.0, -94.0, 147.7, 0.0, -50.0, 0.0],
         "assembly_joint": [-90, -73.29, 120.58, 0, 0, 180],
         # 👇 추가된 중간 경유지 (Waypoint)
         "separation_waypoint": [-90.0, 0.0, 120.0, 0.0, -30.0, 0.0], 
-        "separation_joint": [-90.0, -9.73, 112.34, 0.0, -14.06, 0.0],
-        "drop_joint": [-95.09, 4.38, 135.12, -2.38, -41.78, 0.0],
+        "separation_joint": [-90.91, -9.73, 112.34, 0.0, -14.06, 0.0],
+        "drop_joint": [-95.0, 4.38, 135.12, -2.38, -41.78, 0.0],
         "drop_joint2": [-95.0, 8.48, 132.29, -2.78, -47.6, 2.73], # 2,3층 시퀀스만 해당
-        "drop_joint3": [-95.0, 4.25, 131.84, -3.01, -42.93, 3.06] # 4층 시퀀스  
+        "drop_joint3": [-94.98, 5.27, 132.05, -2.92, -44.17, 2.95], # 4층 시퀀스
+        "drop_joint4": [-100.0, 4.38, 135.12, -2.38, -41.78, 0.0]  # 큰 나무 2층 콤보용 (캘리브레이션 필요)
     }
 }
 
@@ -287,6 +293,8 @@ class DualRobotNode(Node):
                 "ip": cfg["ip"],
                 "cam_x_off": cfg["cam_x_off"],
                 "cam_y_off": cfg["cam_y_off"],
+                "dis_cam_x_off": cfg.get("dis_cam_x_off", cfg["cam_x_off"]),
+                "dis_cam_y_off": cfg.get("dis_cam_y_off", cfg["cam_y_off"]),
                 "home_joint": np.array(cfg["home_joint"], dtype=float),
                 "end_joint": np.array(cfg.get("end_joint", cfg["home_joint"]), dtype=float),
                 "assembly_joint": np.array(cfg.get("assembly_joint", cfg["home_joint"]), dtype=float),
@@ -410,6 +418,20 @@ class DualRobotNode(Node):
                 )
                 robot.move_l_rel(rc, pose, self.L_VEL, self.L_ACC, rb.ReferenceFrame.Tool)
                 self.wait_move(robot_name, f"APPROACH(yaw={req.yaw:.1f})")
+
+            elif req.target_size == "APPROACH_DIS":
+                # 분해 전용 핸들러 — 조립(APPROACH)과 완전히 별도, 서로 영향 없음
+                # 잘 동작하던 시절과 동일한 부호(+x, -y), 오프셋만 dis_ 전용값 사용
+                dx = (req.x * 1000.0) + handle["dis_cam_y_off"]
+                dy = -(req.y * 1000.0) + handle["dis_cam_x_off"]
+                pose = np.array([dy, dx, req.z, 0, 0, req.yaw], dtype=float)
+                self.get_logger().info(
+                    f"[{robot_name}][APPROACH_DIS] req=(x={req.x*1000:.1f}mm, y={req.y*1000:.1f}mm, "
+                    f"z={req.z:.1f}mm, yaw={req.yaw:.1f}°) "
+                    f"→ Tool(X={dy:.1f}mm, Y={dx:.1f}mm, Z={req.z:.1f}mm)"
+                )
+                robot.move_l_rel(rc, pose, self.L_VEL, self.L_ACC, rb.ReferenceFrame.Tool)
+                self.wait_move(robot_name, f"APPROACH_DIS(yaw={req.yaw:.1f})")
 
             elif req.target_size == "APPROACH_DELTA":
                 # 888 정밀 인식 실패 시 fallback 경로용.

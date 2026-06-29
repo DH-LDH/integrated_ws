@@ -23,14 +23,16 @@ from std_msgs.msg import Int32, String
 
 PACKAGE_NAME = "vision_assembly_pkg"
 
+from vision_assembly_pkg.shared_config import ROI_POLYGON as _SHARED_ROI_POLYGON  # noqa: E402
+
 DEBUG_IMAGE_TOPIC = "/camera/camera/color/image_raw"
 DEBUG_DEPTH_TOPIC = "/camera/camera/aligned_depth_to_color/image_raw"
 DEBUG_ANNOTATED_TOPIC = "/decision_assembly/annotated_image"
 DEBUG_COUNT_TOPIC = "/decision_assembly/block_count"
 DEBUG_SUMMARY_TOPIC = "/decision_assembly/summary"
 
-# ROI polygon: 좌상 → 우상 → 우하 → 좌하 순서 (카메라 180° 재설치 기준)
-DEBUG_ROI_POLYGON = [24, 0, 572, 0, 423, 480, 155, 480]
+# ROI polygon: shared_config.py 의 ROI_POLYGON을 flat list로 변환 (argparse default용)
+DEBUG_ROI_POLYGON = [v for pt in _SHARED_ROI_POLYGON for v in pt]
 
 # CV blob 필터
 DEBUG_CV_MIN_AREA = 600.0
@@ -57,7 +59,7 @@ DEBUG_CV_MAX_ESTIMATED_COUNT = 4
 DEBUG_CV_MULTI_COUNT_RATIO = 1.45
 
 # HSV / edge / morphology
-DEBUG_CV_SAT_MIN = 35
+DEBUG_CV_SAT_MIN = 50
 DEBUG_CV_USE_EDGE = True
 DEBUG_CV_EDGE_LOW = 45
 DEBUG_CV_EDGE_HIGH = 135
@@ -105,7 +107,7 @@ DEBUG_YOLO_DEVICE = "0"
 
 # 카운트 안정화 rolling 윈도우 크기 (1=비활성화)
 # 최근 N 프레임의 중앙값을 발행해 모서리 노이즈로 인한 ±1 깜빡임을 제거한다.
-DEBUG_COUNT_SMOOTH_N = 5
+DEBUG_COUNT_SMOOTH_N = 9
 
 # 실행 / 표시
 DEBUG_METHOD = "cv"
@@ -679,6 +681,13 @@ def count_blocks_cv(
 
     roi_mask = make_crop_mask(crop_bgr.shape, offset_x, offset_y, active_polygon)
 
+    # CLAHE: 어두운 환경에서 명암 정규화 (채도·엣지 검출 안정화)
+    # tileGridSize를 크게 잡아 바닥 텍스처 같은 작은 영역의 과도한 명암 증폭을 억제
+    _lab = cv2.cvtColor(crop_bgr, cv2.COLOR_BGR2LAB)
+    _clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(32, 32))
+    _lab[:, :, 0] = _clahe.apply(_lab[:, :, 0])
+    crop_bgr = cv2.cvtColor(_lab, cv2.COLOR_LAB2BGR)
+
     # ROI 경계 여백 마스크: Canny 가 폴리곤 경계를 엣지로 잡는 것을 차단.
     # roi_mask 를 roi_inner_margin 픽셀 침식해 경계 안쪽만 검출 영역으로 사용한다.
     if int(roi_inner_margin) > 0:
@@ -1096,10 +1105,13 @@ def draw_annotated(image_bgr, detections, total_count, roi=None, roi_polygon=Non
         if "center_xy" in det:
             cv2.circle(annotated, tuple(det["center_xy"]), 4, color, -1)
 
+        img_w = annotated.shape[1]
+        (lw, _), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+        text_x = int(x1) if int(x1) + lw + 4 <= img_w else max(0, int(x2) - lw)
         cv2.putText(
             annotated,
             label,
-            (x1, max(18, y1 - 6)),
+            (text_x, max(18, int(y1) - 6)),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.55,
             color,
@@ -1116,10 +1128,13 @@ def draw_annotated(image_bgr, detections, total_count, roi=None, roi_polygon=Non
 
             cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 0, 255), 1)
             label = f'{reason} {area:.0f}/{single_area:.0f}'
+            img_w = annotated.shape[1]
+            (lw, _), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+            text_x = int(x1) if int(x1) + lw + 4 <= img_w else max(0, int(x2) - lw)
             cv2.putText(
                 annotated,
                 label,
-                (x1, min(annotated.shape[0] - 5, y2 + 16)),
+                (text_x, min(annotated.shape[0] - 5, int(y2) + 16)),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.45,
                 (0, 0, 255),

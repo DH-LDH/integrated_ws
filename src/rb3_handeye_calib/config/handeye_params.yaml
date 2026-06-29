@@ -1,0 +1,36 @@
+# handeye_params.yaml
+# =====================
+# 핸드아이 캘리브레이션 파라미터 기본값.
+# ros2 launch 시 --params-file 옵션으로 적용하거나
+# Node의 parameters=[...] 에 포함하여 사용.
+
+# ── 로봇 ──────────────────────────────────────────────────────────────────
+tcp_pose_publisher:
+  ros__parameters:
+    robot_ip: "10.0.2.7"        # robot1
+    robot_name: "robot1"
+    publish_rate: 20.0           # Hz
+    frame_id: "base"
+    euler_order: "xyz"           # RB3 TCP Euler 순서 (실제 로봇에서 반드시 확인)
+
+# ── 샘플 수집 ──────────────────────────────────────────────────────────────
+sample_collector:
+  ros__parameters:
+    robot_name: "robot1"
+    session_dir: ""              # 비어있으면 ~/handeye_samples/<timestamp> 자동 생성
+    squares_x: 7
+    squares_y: 5
+    square_length_mm: 30.0      # 반드시 실제 인쇄본을 ruler로 측정해 맞출 것
+    marker_length_mm: 22.0      # square_length_mm * 0.75 이하 권장
+    dictionary: "DICT_4X4_50"
+    min_corners: 8              # 낮추면 검출은 쉬워지나 정확도 저하
+    euler_order: "xyz"
+    save_annotated: true        # 각 캡처 시 annotated PNG 저장
+
+# ── solver ─────────────────────────────────────────────────────────────────
+handeye_solver:
+  ros__parameters:
+    samples_yaml: ""            # 필수: 수집된 samples.yaml 경로
+    output_yaml: ""             # 비어있으면 samples.yaml 과 같은 디렉토리에 result_handeye.yaml
+    method: "Tsai"              # Tsai | Park | Horaud | Andreff | Daniilidis
+    euler_order: "xyz"          # tcp_pose_publisher 와 동일하게 유지

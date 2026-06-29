@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(awk -F: '$2 > 3600 && $2 < 3815')",
+      "Bash(grep -v \"^[+-]$\")",
+      "Bash(git -C /home/orinagx/integrated_ws/src diff HEAD -- src/control_pkg/control_pkg/master_node_dis.py src/vision_pkg/vision_pkg/INUVisionLib.py)"
+    ]
+  }
+}

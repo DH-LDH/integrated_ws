@@ -81,6 +81,11 @@ class BatteryDualDisassembly(Node):
         res = self.call(self.cli_g1, SetBool.Request(data=closed))
         return res is not None and res.success
 
+    def open_both_grippers(self):
+        """robot1, robot2 그리퍼 순차 open"""
+        self.call(self.cli_g1, SetBool.Request(data=False))
+        self.call(self.cli_g2, SetBool.Request(data=False))
+
     def move_z(self, cli, dz_mm: float) -> bool:
         req = GetTargetPose.Request()
         req.target_size = "Z"
@@ -94,6 +99,18 @@ class BatteryDualDisassembly(Node):
         return self.call(cli, req).success
 
     # ── 비전 ─────────────────────────────────────────────────
+
+    def verify_product(self, comp_id: int, name: str) -> bool:
+        """best_comp.pt로 작업대 위 제품 확인 (분해 시작 전 호출)"""
+        req = GetTargetPose.Request()
+        req.target_color = str(comp_id)
+        self.get_logger().info(f"[VERIFY] {name} 확인 중 (comp_id={comp_id})...")
+        res = self.call(self.cli_v_dis, req)
+        if res is None or not res.success:
+            self.get_logger().error(f"[VERIFY] {name} 인식 실패 — 분해 중단")
+            return False
+        self.get_logger().info(f"[VERIFY] {name} 확인 완료: class={res.class_name}")
+        return True
 
     def _normalize_target(self, target: str) -> str:
         aliases = {
@@ -216,7 +233,7 @@ class BatteryDualDisassembly(Node):
         z_approach  = z_move - self.Z_MARGIN
 
         req = GetTargetPose.Request()
-        req.target_size = "APPROACH"
+        req.target_size = "APPROACH_DIS"
         req.x   = p.x
         req.y   = p.y
         req.z   = z_approach
@@ -379,8 +396,7 @@ class BatteryDualDisassembly(Node):
 
         self.get_logger().info(f"{name} 2층 분해 시작: {top_label} / {bot_label}")
         self.move_both_home_pose()
-        self.set_gripper1(False)
-        self.set_gripper(self.cli_g2, False)
+        self.open_both_grippers()
 
         if not self.robot1_top_pick(top_target, top_label, expected_layer=2, yaw_offset=yaw_offset):
             return False
@@ -407,8 +423,7 @@ class BatteryDualDisassembly(Node):
         """
         self.get_logger().info(f"{name} {len(layers)}층 분해 시작")
         self.move_both_home_pose()
-        self.set_gripper1(False)
-        self.set_gripper(self.cli_g2, False)
+        self.open_both_grippers()
 
         auto_slots = ["DROP" if i == 0 else f"DROP{i + 1}" for i in range(len(layers))]
 
@@ -461,8 +476,7 @@ class BatteryDualDisassembly(Node):
         """
         self.get_logger().info(f"{name} 분해 시작")
         self.move_both_home_pose()
-        self.set_gripper1(False)
-        self.set_gripper(self.cli_g2, False)
+        self.open_both_grippers()
 
         if not self.robot1_top_pick(top_target, top_label, expected_layer=3):
             return False
@@ -533,101 +547,103 @@ class BatteryDualDisassembly(Node):
         return self._run_new_seq("망치", "4x2_blue", "3층 파랑", "2층 빨강", "1층 빨강")
 
     def run_big_carrot_once(self):
-        return self._run_layers("큰 당근", [
-            (4, "2x2_green",  "2x2 초록"),
-            (3, "4x2_yellow", "4x2 노랑"),
-            (2, "2x2_yellow", "2x2 노랑"),
-            (1, "2x2_yellow", "2x2 노랑"),
-        ])
+        """큰 당근: 최상단 픽(robot2 안정화 후 DROP4) 후 나머지 3층 패턴"""
+        self.get_logger().info("큰 당근 분해 시작")
+        self.move_both_home_pose()
+        self.open_both_grippers()
+
+        # 1단계: 4층 2x2 초록
+        #   robot1 픽 → robot2 세퍼레이션 그립(3층 고정) → robot1 풀업
+        #   → robot2 홈(그립 유지) → robot1 center → robot1 홈
+        #   → robot2 DROP4 → robot2 그리퍼 오픈 → robot2 홈
+        if not self.robot1_top_pick("2x2_green", "4층 2x2 초록", expected_layer=4, z_extra_mm=38.0):
+            return False
+        if not self.robot2_side_hold("1층 2x2 노랑"):
+            return False
+        if not self.robot1_pull_up("4층 2x2 초록"):
+            return False
+        if not self.robot2_return_home_holding("1층 2x2 노랑"):
+            return False
+        if not self.robot1_place_top_at_center_and_home("4층 2x2 초록"):
+            return False
+        if not self.send_pose(self.cli_r2, "DROP4"):
+            return False
+        self.set_gripper(self.cli_g2, False)
+        self.call(self.cli_h2, Trigger.Request())
+
+        # 2~4단계: 나머지 3층 (2x2 초록 → 2x2 노랑 → 4x2 노랑)
+        return self._run_new_seq(
+            "큰 당근 (하단 3층)",
+            "2x2_green", "3층 2x2 초록",
+            "2층 4x2 노랑", "1층 2x2 노랑"
+        )
 
     def run_burger_once(self):
-        """버거: 3층=4x2노랑 / 2층=2x2빨강→4x2빨강(Y필터) / 1층=4x2노랑"""
-        self.get_logger().info("버거 분해 시작")
-        self.move_both_home_pose()
-        self.set_gripper1(False)
-        self.set_gripper(self.cli_g2, False)
-
-        steps = [
-            lambda: self.robot1_pick_layer_and_drop(
-                "4x2_yellow", "3층 4x2 노랑", 3, "DROP",
-                bottom_label="2x2 빨강"),
-            lambda: self.robot1_pick_layer_and_drop(
-                "2x2_red", "2층 2x2 빨강", 2, "DROP2",
-                bottom_label="4x2 빨강"),
-            lambda: self.robot1_pick_layer_and_drop(
-                "4x2_red", "2층 4x2 빨강", 2, "DROP3",
-                bottom_label="4x2 노랑", prefer_max_y=True),
-            lambda: self.robot1_pick_layer_and_drop(
-                "4x2_yellow", "1층 4x2 노랑", 1, "DROP4"),
-        ]
-
-        for step in steps:
-            if not step():
-                return False
-
-        self.get_logger().info("[완료] 버거")
-        self.move_both_end_pose()
-        return True
+        return self._run_new_seq("버거", "4x2_yellow", "3층 노랑", "4x2 빨강", "1층 노랑")
 
     def run_ice_cream_once(self):
-        self.get_logger().info("아이스크림 5층 분해 시작")
+        """아이스크림: 최상단 픽(robot2 3층파랑 안정화 후 DROP3) 후 나머지 3층 패턴"""
+        self.get_logger().info("아이스크림 분해 시작")
         self.move_both_home_pose()
-        self.set_gripper1(False)
+        self.open_both_grippers()
+
+        # 1단계: 4층 2x2 초록
+        #   robot1 픽 → robot2 세퍼레이션 그립(3층 파랑 고정) → robot1 풀업
+        #   → robot2 홈(그립 유지) → robot1 center → robot1 홈
+        #   → robot2 DROP → robot2 그리퍼 오픈 → robot2 홈
+        if not self.robot1_top_pick("2x2_green", "4층 2x2 초록", expected_layer=4, z_extra_mm=38.0):
+            return False
+        if not self.robot2_side_hold("1층 2x2 노랑"):
+            return False
+        if not self.robot1_pull_up("4층 2x2 초록"):
+            return False
+        if not self.robot2_return_home_holding("1층 2x2 노랑"):
+            return False
+        if not self.robot1_place_top_at_center_and_home("4층 2x2 초록"):
+            return False
+        if not self.send_pose(self.cli_r2, "DROP4"):
+            return False
         self.set_gripper(self.cli_g2, False)
+        self.call(self.cli_h2, Trigger.Request())
 
-        steps = [
-            lambda: self.robot1_pick_layer_and_drop(
-                "2x2_green", "4층 2x2 초록", 4, "DROP",
-                bottom_label="2x2 파랑", robot2_drop_slot="DROP3"),
-            lambda: self.robot1_pick_layer_and_drop(
-                "2x2_blue", "3층 2x2 파랑", 3, "DROP2",
-                bottom_label="2x2 빨강", robot2_drop_slot="DROP2"),
-            lambda: self.robot1_pick_layer_and_drop(
-                "2x2_red", "3층 2x2 빨강", 3, "DROP3",
-                bottom_label="4x2 노랑", robot2_drop_slot="DROP2"),
-            lambda: self.robot1_pick_layer_and_drop(
-                "4x2_yellow", "2층 4x2 노랑", 2, "DROP4",
-                bottom_label="2x2 노랑", robot2_drop_slot="DROP2"),
-            lambda: self.robot1_pick_layer_and_drop(
-                "2x2_yellow", "1층 2x2 노랑", 1, "DROP5"),
-        ]
-
-        for step in steps:
-            if not step():
-                return False
-
-        self.get_logger().info("[완료] 아이스크림")
-        self.move_both_end_pose()
-        return True
+        # 2~4단계: 나머지 3층 (2x2 초록 → 4x2 노랑 → 2x2 빨강, 2x2 파랑)
+        return self._run_new_seq(
+            "아이스크림 (하단 3층)",
+            "2x2_green", "3층 2x2 초록",
+            "2층 2x2 파랑, 2x2 빨강", "1층 4x2 노랑"
+        )
 
     def run_big_tree_once(self):
-        """큰 나무: 비표준 순서가 필요한 특수 시퀀스"""
-        self.get_logger().info("큰 나무 특수 분해 시작")
+        """큰 나무: 4층 픽(robot2 세퍼레이션 안정화) 후 신호등 패턴(3층→2층→1층)"""
+        self.get_logger().info("큰 나무 분해 시작")
         self.move_both_home_pose()
-        self.set_gripper1(False)
+        self.open_both_grippers()
+
+        # 1단계: 4층 2x2 초록
+        #   robot1 픽 → robot2 세퍼레이션 그립(3층 고정) → robot1 풀업
+        #   → robot2 홈(그립 유지) → robot1 DROP → robot1 홈
+        #   → robot2 DROP2 → robot2 그리퍼 오픈 → robot2 홈
+        if not self.robot1_top_pick("2x2_green", "4층 2x2 초록", expected_layer=4):
+            return False
+        if not self.robot2_side_hold("3층 4x2 초록"):
+            return False
+        if not self.robot1_pull_up("4층 2x2 초록"):
+            return False
+        if not self.robot2_return_home_holding("3층 4x2 초록"):
+            return False
+        if not self.robot1_drop_top_and_home("4층 2x2 초록", "DROP4"):
+            return False
+        if not self.send_pose(self.cli_r2, "DROP3"):
+            return False
         self.set_gripper(self.cli_g2, False)
+        self.call(self.cli_h2, Trigger.Request())
 
-        steps = [
-            lambda: self.robot1_pick_layer_and_drop(
-                "2x2_green", "4층 2x2 초록", 4, "DROP",
-                bottom_label="4x2 초록", robot2_drop_slot="DROP3"),
-            lambda: self.robot1_pick_layer_place_center_robot2_drop(
-                "4x2_green", "2층 4x2 초록 (1층 분리용)", 2,
-                bottom_label="2x2 노랑", robot2_drop_slot="DROP2", z_extra_mm=13.0),
-            lambda: self.robot1_pick_layer_and_drop(
-                "2x2_yellow", "1층 2x2 노랑", 1, "DROP2"),
-            lambda: self.robot1_pick_layer_drop_top_then_robot2_drop(
-                "4x2_green", "3층 4x2 초록", 3, "DROP3",
-                bottom_label="2층 4x2 초록", robot2_drop_slot="DROP2"),
-            lambda: self.robot1_pick_layer_and_drop(
-                "4x2_green", "남은 2층 4x2 초록", 2, "DROP4"),
-            lambda: self.robot1_pick_layer_and_drop(
-                "2x2_green", "남은 2층 2x2 초록", 2, "DROP5"),
-        ]
-
-        for step in steps:
-            if not step():
-                return False
+        # 2~4단계: 신호등과 동일한 3층 패턴 (3층→2층→1층)
+        return self._run_new_seq(
+            "큰 나무 (하단 3층)",
+            "4x2_green", "3층 4x2 초록",
+            "2층 4x2 초록", "1층 노랑"
+        )
 
         self.get_logger().info("[완료] 큰 나무")
         self.move_both_end_pose()
