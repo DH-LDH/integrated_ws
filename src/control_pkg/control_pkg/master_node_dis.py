@@ -572,10 +572,78 @@ class BatteryDualDisassembly(Node):
         ])
 
     def run_estop_once(self):
-        return self._run_two_layer("E-stop", [
-            (2, "2x2_red",    "2x2 빨강", 90.0),
-            (1, "2x4_yellow", "2x4 노랑"),
-        ])
+        """
+        E-stop 2층 분해.
+          1단계: 1층 4x2 노랑 위치로 접근 → 그립 → YAW 정렬 → 그리퍼 오픈
+          2단계: Z 상승(BLOCK_H) → 2층 2x2 빨강 파지 → SEPARATION
+          3단계: 표준 2층 분해 (robot2 고정 → pull_up → drop)
+        """
+        self.get_logger().info("E-stop 분해 시작")
+        self.move_both_home_pose()
+        self.open_both_grippers()
+
+        # ── 1단계: 1층 4x2 노랑 위치 스캔 → 접근 → YAW 정렬 ──
+        p, _ = self.find_target("4x2_yellow")
+        if not p:
+            self.get_logger().error("[ESTOP] 비전 실패: 1층 4x2 노랑")
+            return False
+
+        target_yaw = self._pick_wrist_yaw(p.yaw + self.WRIST_OFFSET)
+        z_move     = (p.z * 1000.0 + self.Z_OFF) + 19.0   # expected_layer=1, z_extra=19.0
+        z_approach = z_move - self.Z_MARGIN
+
+        req = GetTargetPose.Request()
+        req.target_size = "APPROACH_DIS"
+        req.x   = p.x
+        req.y   = p.y
+        req.z   = z_approach
+        req.yaw = target_yaw
+        self.call(self.cli_r1, req)
+        self.move_z(self.cli_r1, self.Z_MARGIN)
+
+        if not self.set_gripper1(True):
+            self.get_logger().error("[ESTOP] 초기 파지 실패")
+            return False
+
+        pos = self._last_grip_pos
+        self.get_logger().info(f"[ESTOP] Arduino pos={pos}")
+        if pos is not None and 300 <= pos <= 400:
+            self.get_logger().warn(f"[ESTOP] pos={pos} → YAW -90° 재정렬")
+            self.set_gripper1(False)
+            req_yaw = GetTargetPose.Request()
+            req_yaw.target_size = "YAW"
+            req_yaw.yaw = -90.0
+            self.call(self.cli_r1, req_yaw)
+            if not self.set_gripper1(True):
+                self.get_logger().error("[ESTOP] YAW 재그립 실패")
+                return False
+
+        # ── 2단계: 그리퍼 오픈 → Z 상승(BLOCK_H) → 2층 2x2 빨강 파지 → SEPARATION ──
+        self.set_gripper1(False)
+        self.move_z(self.cli_r1, -self.BLOCK_H)
+
+        if not self.set_gripper1(True):
+            self.get_logger().error("[ESTOP] 2층 2x2 빨강 파지 실패")
+            return False
+
+        if not self.send_pose(self.cli_r1, "SEPARATION"):
+            return False
+
+        # ── 3단계: 표준 2층 분해 ──
+        if not self.robot2_side_hold("1층 4x2 노랑"):
+            return False
+        if not self.robot1_pull_up("2층 2x2 빨강"):
+            return False
+        if not self.robot2_return_home_holding("1층 4x2 노랑"):
+            return False
+        if not self.robot1_drop_top_and_home("2층 2x2 빨강"):
+            return False
+        if not self.robot2_drop_bottom_and_home("1층 4x2 노랑"):
+            return False
+
+        self.get_logger().info("[완료] E-stop")
+        self.move_both_end_pose()
+        return True
 
     def _run_new_seq(self, name: str, top_target: str, top_label: str,
                      mid_label: str, bot_label: str, use_pos_check: bool = False) -> bool:
