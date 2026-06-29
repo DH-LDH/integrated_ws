@@ -35,6 +35,7 @@ class BatteryDualDisassembly(Node):
         r2_grip_srv = self.declare_parameter("robot2_gripper_service", "/robot2/control_gripper").value
         self.cli_g1 = self.create_client(SetBool, r1_grip_srv)
         self.cli_g2 = self.create_client(SetBool, r2_grip_srv)
+        self._last_grip_pos: int | None = None
 
         # 파라미터 로드 (기본값은 위 상수 참조)
         self.Z_OFF          = float(self.declare_parameter("robot1_z_off",          Z_OFF_DEFAULT).value)
@@ -77,8 +78,16 @@ class BatteryDualDisassembly(Node):
         return res.success
 
     def set_gripper1(self, closed: bool) -> bool:
-        """그리퍼1 전용: sleep 없이 서비스 응답 성공 여부로 즉시 반환"""
+        """그리퍼1 전용: sleep 없이 서비스 응답 성공 여부로 즉시 반환.
+        그립 시 Arduino pos 값을 self._last_grip_pos에 저장 (파싱 실패 시 None)."""
         res = self.call(self.cli_g1, SetBool.Request(data=closed))
+        if closed:
+            self._last_grip_pos = None
+            if res is not None and res.message and "|pos=" in res.message:
+                try:
+                    self._last_grip_pos = int(res.message.split("|pos=")[1])
+                except (IndexError, ValueError):
+                    pass
         return res is not None and res.success
 
     def open_both_grippers(self):
@@ -244,6 +253,67 @@ class BatteryDualDisassembly(Node):
         if not self.set_gripper1(True):
             self.get_logger().error("[PICK] 그리퍼1 파지 실패")
             return False
+        self.send_pose(self.cli_r1, "SEPARATION")
+        return True
+
+    def robot1_top_pick_with_pos_check(self, target: str, top_label: str,
+                                        expected_layer: int = None,
+                                        yaw_offset: float = 0.0,
+                                        z_extra_mm: float = 0.0) -> bool:
+        """
+        robot1_top_pick과 동일하지만 그립 후 Arduino pos를 확인해 분기 처리.
+          pos 300~400 → 정상, 그대로 SEPARATION으로 진행
+          pos 500~600 → 손목 90° 회전 후 재어프로치 & 재그립
+        아이스크림 4층 초록 전용.
+        """
+        self.get_logger().info(
+            f"[PICK+POS] {top_label} (layer={expected_layer}, z_extra={z_extra_mm})"
+        )
+        p, _ = self.find_target(target)
+        if not p:
+            self.get_logger().error(f"[PICK+POS] 비전 실패: {top_label}")
+            return False
+
+        target_yaw  = self._pick_wrist_yaw(p.yaw + yaw_offset + self.WRIST_OFFSET)
+        layer_index = max(0.0, (expected_layer or 2) - self.LAYER_IDX_OFF)
+        z_move      = (p.z * 1000.0 + self.Z_OFF) - (self.BLOCK_H * layer_index) + z_extra_mm
+        z_approach  = z_move - self.Z_MARGIN
+
+        req = GetTargetPose.Request()
+        req.target_size = "APPROACH_DIS"
+        req.x   = p.x
+        req.y   = p.y
+        req.z   = z_approach
+        req.yaw = target_yaw
+        self.call(self.cli_r1, req)
+        self.move_z(self.cli_r1, self.Z_MARGIN)
+
+        if not self.set_gripper1(True):
+            self.get_logger().error("[PICK+POS] 1차 그립 실패")
+            return False
+
+        pos = self._last_grip_pos
+        self.get_logger().info(f"[PICK+POS] Arduino pos={pos}")
+
+        if pos is not None and 300 <= pos <= 400:
+            self.get_logger().warn(f"[PICK+POS] pos={pos} → 그리퍼 열고 손목 90° 회전 후 재그립")
+            self.set_gripper1(False)
+
+            req2 = GetTargetPose.Request()
+            req2.target_size = "YAW"
+            req2.yaw = 90.0
+            self.call(self.cli_r1, req2)
+
+            if not self.set_gripper1(True):
+                self.get_logger().error("[PICK+POS] 재그립 실패")
+                return False
+            self.get_logger().info(f"[PICK+POS] 재그립 완료 (pos={self._last_grip_pos})")
+
+        elif pos is not None and 500 <= pos <= 600:
+            self.get_logger().info(f"[PICK+POS] pos={pos} → 정상 그립, 그대로 진행")
+        else:
+            self.get_logger().warn(f"[PICK+POS] pos={pos} → 범위 외, 그대로 진행")
+
         self.send_pose(self.cli_r1, "SEPARATION")
         return True
 
@@ -591,7 +661,8 @@ class BatteryDualDisassembly(Node):
         #   robot1 픽 → robot2 세퍼레이션 그립(3층 파랑 고정) → robot1 풀업
         #   → robot2 홈(그립 유지) → robot1 center → robot1 홈
         #   → robot2 DROP → robot2 그리퍼 오픈 → robot2 홈
-        if not self.robot1_top_pick("2x2_green", "4층 2x2 초록", expected_layer=4, z_extra_mm=38.0):
+        # 1단계: pos 확인 포함 픽 (300~400 정상 / 500~600 손목 90° 재그립)
+        if not self.robot1_top_pick_with_pos_check("2x2_green", "4층 2x2 초록", expected_layer=4, z_extra_mm=38.0):
             return False
         if not self.robot2_side_hold("1층 2x2 노랑"):
             return False

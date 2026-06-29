@@ -1,6 +1,7 @@
 import rclpy
 from rclpy.node import Node
 from std_srvs.srv import SetBool
+import re
 import serial
 import time
 import threading
@@ -11,6 +12,7 @@ class GripperNode(Node):
         super().__init__('gripper_node')
         self.srv = self.create_service(SetBool, 'control_gripper', self.control_cb)
         self._serial_lock = threading.Lock()
+        self._last_pos: int | None = None
 
         try:
             # timeout=0.5: readline 한 번당 최대 대기. 실제 완료 판정은 _wait_for_result에서 함
@@ -51,6 +53,9 @@ class GripperNode(Node):
             line = self.ser.readline().decode(errors='ignore').strip()
             if line:
                 self.get_logger().info(f"[ARDUINO] {line}")
+                m = re.search(r'pos[:\s=]*(\d+)', line, re.IGNORECASE)
+                if m:
+                    self._last_pos = int(m.group(1))
             if success_kw and success_kw in line:
                 return True
             if fail_kw and fail_kw in line:
@@ -96,24 +101,26 @@ class GripperNode(Node):
         try:
             with self._serial_lock:
                 if request.data:  # True -> Grip
+                    self._last_pos = None  # 그립 시작 전 pos 초기화
                     self.ser.write(b"grip\n")
                     self.get_logger().info("📌 Sent: grip — Arduino 파지 완료 신호 대기 중...")
 
                     result = self._wait_for_result("Torque remains ON", "Failed", 5.0)
+                    pos_str = str(self._last_pos) if self._last_pos is not None else "-1"
 
                     if result is True:
-                        self.get_logger().info("📌 Grip SUCCESS")
+                        self.get_logger().info(f"📌 Grip SUCCESS (pos={pos_str})")
                         response.success = True
-                        response.message = "Gripped"
+                        response.message = f"Gripped|pos={pos_str}"
                     elif result is False:
                         self.get_logger().warn("📌 Grip FAIL: 물체 없음 또는 타임아웃. 그리퍼 열리는 중...")
                         self._wait_for_result("[OPEN]", None, 4.0)
                         response.success = False
-                        response.message = "Grip failed (no object or timeout)"
+                        response.message = f"Grip failed (no object or timeout)|pos={pos_str}"
                     else:
                         self.get_logger().warn("📌 Grip: Arduino 응답 타임아웃. 파지 완료로 간주합니다.")
                         response.success = True
-                        response.message = "Gripped (no ACK fallback)"
+                        response.message = f"Gripped (no ACK fallback)|pos={pos_str}"
 
                 else:  # False -> Open
                     self.ser.write(b"open\n")
