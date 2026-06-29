@@ -1,8 +1,45 @@
 #!/usr/bin/env python3
 """
-coord_debug_node.py
-====================
-버드아이뷰(KHJ) ↔ 로봇1 좌표 변환 디버깅 노드.
+===============================================================================
+File        : coord_debug_node.py
+Package     : control_pkg
+Author      : Jeho Yoon, Chaerin Seong, Dahan Lee, Donghyuk Jeong, Deokhui Han, Donggil Lee
+Created     : 2026-06-30
+Environment : Ubuntu 22.04, ROS2 Humble, Python 3.10
+
+Description
+-----------
+Calibration and debugging node for the birdseye-view (KHJ) to robot1
+coordinate transformation. Collects matched pose snapshots and fits a 2×2
+linear transformation matrix to correct axis mapping errors caused by the
+90° rotational offset between the two cameras.
+
+Main Features
+-------------
+- /coord_debug/snapshot     : Capture current KHJ + vision pose snapshot
+- /coord_debug/snapshot_raw : Capture raw birdseye data + vision (no khj_point required)
+- /coord_debug/fit          : Fit 2×2 transformation matrix from collected samples
+- /coord_debug/clear        : Clear all collected calibration data
+- /coord_debug/diagnose     : Diagnose axis orientation at a single point
+
+Required Nodes
+--------------
+- vision node    : /get_target_pose (GetTargetPose)
+- khj_point_node : /khj_point (birdseye object positions)
+
+Notes
+-----
+- robot1 (vision cam) faces south; robot2 (birdseye cam) faces west → 90° axis offset
+- Minimum 2 samples required for fit; 4+ recommended for accuracy
+
+Revision History
+----------------
+
+===============================================================================
+"""
+
+# coord_debug_node.py
+# 버드아이뷰(KHJ) ↔ 로봇1 좌표 변환 디버깅 노드.
 
 배경
 ----

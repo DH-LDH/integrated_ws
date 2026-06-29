@@ -1,30 +1,39 @@
 """
-realsense_handeye.launch.py
-============================
-RealSense D435 + 핸드아이 샘플 수집 전체 스택 실행:
-  1. realsense2_camera   – D435 카메라 드라이버
-  2. tcp_pose_publisher  – 로봇 TCP → ROS2 topic
-  3. sample_collector    – /handeye/capture_sample 서비스
+===============================================================================
+File        : realsense_handeye.launch.py
+Package     : rb3_handeye_calib
+Author      : Jeho Yoon, Chaerin Seong, Dahan Lee, Donghyuk Jeong, Deokhui Han, Donggil Lee
+Created     : 2026-06-30
+Environment : Ubuntu 22.04, ROS2 Humble, Python 3.10
 
-사용 전제
----------
-ros2 pkg list | grep realsense2_camera
-  → realsense2_camera 패키지가 설치되어 있어야 합니다.
-  → 설치: sudo apt install ros-humble-realsense2-camera
+Description
+-----------
+All-in-one launch file for the RealSense D435 + hand-eye calibration
+sample collection pipeline. Starts camera driver, TCP publisher, and
+sample collector in a single launch command.
 
-사용법
-------
-ros2 launch rb3_handeye_calib realsense_handeye.launch.py \
-    robot_ip:=10.0.2.7 robot_name:=robot1 \
-    session_dir:=/home/user/handeye_samples/session1
+Main Features
+-------------
+- realsense2_camera  : Intel RealSense D435 camera driver
+- tcp_pose_publisher : publishes robot TCP pose as ROS2 topic
+- sample_collector   : provides /handeye/capture_sample and /handeye/reset_samples
 
-샘플 캡처 (다른 터미널)
------------------------
-ros2 service call /handeye/capture_sample std_srvs/srv/Trigger
+Required Nodes
+--------------
+- realsense2_camera package: sudo apt install ros-humble-realsense2-camera
+- rbpodo Cobot driver
 
-리셋
-----
-ros2 service call /handeye/reset_samples std_srvs/srv/Trigger
+Notes
+-----
+Usage: ros2 launch rb3_handeye_calib realsense_handeye.launch.py \
+         robot_ip:=10.0.2.7 robot_name:=robot1 session_dir:=<path>
+Capture: ros2 service call /handeye/capture_sample std_srvs/srv/Trigger
+Reset:   ros2 service call /handeye/reset_samples std_srvs/srv/Trigger
+
+Revision History
+----------------
+
+===============================================================================
 """
 
 import os

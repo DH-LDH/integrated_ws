@@ -1,3 +1,38 @@
+"""
+===============================================================================
+File        : INUVisionCall.py
+Package     : vision_pkg
+Author      : Jeho Yoon, Chaerin Seong, Dahan Lee, Donghyuk Jeong, Deokhui Han, Donggil Lee
+Created     : 2026-06-30
+Environment : Ubuntu 22.04, ROS2 Humble, Python 3.10
+
+Description
+-----------
+High-level vision API wrapper that calls INUVisionLib for camera capture
+and YOLO-based 6D pose inference. Provides a simple function interface
+for vision_node and vision_node_dis to request object poses.
+
+Main Features
+-------------
+- Wraps INUVisionLib camera and inference pipeline
+- Returns structured 6D pose results (x, y, z, yaw) per target class
+- Configurable camera mode and serial number
+
+Required Nodes
+--------------
+- None (library module, used by vision_node / vision_node_dis)
+
+Notes
+-----
+- Default camera mode: mid_50
+- Default camera serial: 332322072441
+
+Revision History
+----------------
+
+===============================================================================
+"""
+
 import os
 import time
 from vision_pkg import INUVisionLib as ivl

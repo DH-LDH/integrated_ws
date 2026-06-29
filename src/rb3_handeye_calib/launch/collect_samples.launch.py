@@ -1,20 +1,37 @@
 """
-collect_samples.launch.py
-=========================
-샘플 수집 단계:
-  1. realsense2_camera   – D435 카메라 드라이버 (use_realsense_launch:=true 시)
-  2. tcp_pose_publisher  – 로봇 TCP pose 를 ROS2 topic으로 publish
-  3. sample_collector    – /handeye/capture_sample 서비스 대기
+===============================================================================
+File        : collect_samples.launch.py
+Package     : rb3_handeye_calib
+Author      : Jeho Yoon, Chaerin Seong, Dahan Lee, Donghyuk Jeong, Deokhui Han, Donggil Lee
+Created     : 2026-06-30
+Environment : Ubuntu 22.04, ROS2 Humble, Python 3.10
 
-사용법
-------
-ros2 launch rb3_handeye_calib collect_samples.launch.py \
-    robot_ip:=10.0.2.7 robot_name:=robot1 \
-    use_realsense_launch:=true
+Description
+-----------
+Launch file for the hand-eye calibration sample collection stage.
+Starts camera driver, TCP pose publisher, and sample collector node.
 
-샘플 캡처 (다른 터미널)
------------------------
-ros2 service call /handeye/capture_sample std_srvs/srv/Trigger
+Main Features
+-------------
+- realsense2_camera  : D435 camera driver (when use_realsense_launch:=true)
+- tcp_pose_publisher : publishes robot TCP pose to ROS2 topic
+- sample_collector   : waits for /handeye/capture_sample service calls
+
+Required Nodes
+--------------
+- realsense2_camera package (optional, enabled via use_realsense_launch arg)
+- rbpodo Cobot driver (robot TCP reading)
+
+Notes
+-----
+Usage: ros2 launch rb3_handeye_calib collect_samples.launch.py \
+         robot_ip:=10.0.2.7 robot_name:=robot1 use_realsense_launch:=true
+Capture: ros2 service call /handeye/capture_sample std_srvs/srv/Trigger
+
+Revision History
+----------------
+
+===============================================================================
 """
 
 from launch import LaunchDescription

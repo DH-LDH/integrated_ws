@@ -1,3 +1,41 @@
+"""
+===============================================================================
+File        : main.launch.py
+Package     : launch_pkg
+Author      : Jeho Yoon, Chaerin Seong, Dahan Lee, Donghyuk Jeong, Deokhui Han, Donggil Lee
+Created     : 2026-06-30
+Environment : Ubuntu 22.04, ROS2 Humble, Python 3.10
+
+Description
+-----------
+Main launch file for the full assembly (PRODUCE) and disassembly (RECYCLE) pipeline.
+Starts all nodes required for the complete dual-robot workflow including
+vision, assembly planning, and robot control.
+
+Main Features
+-------------
+- robot_node               (control_pkg)         : dual robot motion control
+- master_node              (control_pkg)          : assembly sequence orchestration
+- master_node_dis          (control_pkg)          : disassembly sequence orchestration
+- gripper_node             (hardware_pkg)         : robot1 serial gripper
+- robot2_gpio_gripper_node (hardware_pkg)         : robot2 GPIO gripper
+- vision_node              (vision_pkg)           : 6D pose estimation vision
+- birdseye_assembly        (vision_assembly_pkg)  : birdseye-view assembly planning
+
+Required Nodes
+--------------
+- All nodes listed above are launched by this file
+
+Notes
+-----
+- Superset of dis.launch.py; includes assembly-specific nodes
+
+Revision History
+----------------
+
+===============================================================================
+"""
+
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, TimerAction, IncludeLaunchDescription
 from launch.conditions import IfCondition, UnlessCondition

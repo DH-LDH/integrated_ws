@@ -1,3 +1,41 @@
+"""
+===============================================================================
+File        : master_node.py
+Package     : control_pkg
+Author      : Jeho Yoon, Chaerin Seong, Dahan Lee, Donghyuk Jeong, Deokhui Han, Donggil Lee
+Created     : 2026-06-30
+Environment : Ubuntu 22.04, ROS2 Humble, Python 3.10
+
+Description
+-----------
+Master node for the assembly (PRODUCE) sequence.
+Receives PRODUCE tasks from command_node and controls robot1 and robot2
+to perform Lego block assembly using vision-guided pick-and-place operations.
+
+Main Features
+-------------
+- Vision-guided block detection and coordinate transformation
+- Multi-layer Lego block assembly sequence
+- Birdseye-view (KHJ) to robot coordinate mapping
+- Collaborative dual-robot assembly control
+
+Required Nodes
+--------------
+- robot_node : /{robot_name}/robot_move_step (GetTargetPose)
+- vision node : /get_target_pose (GetTargetPose)
+- gripper node : /gripper/open, /gripper/grip (Trigger)
+- khj_point_node : /khj_point (birdseye assembly data)
+
+Notes
+-----
+- Currently under development (all code commented out)
+
+Revision History
+----------------
+
+===============================================================================
+"""
+
 # import json
 # import rclpy
 # from rclpy.node import Node

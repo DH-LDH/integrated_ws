@@ -1,4 +1,38 @@
-# vision_node.py
+"""
+===============================================================================
+File        : vision_node.py
+Package     : vision_pkg
+Author      : Jeho Yoon, Chaerin Seong, Dahan Lee, Donghyuk Jeong, Deokhui Han, Donggil Lee
+Created     : 2026-06-30
+Environment : Ubuntu 22.04, ROS2 Humble, Python 3.10
+
+Description
+-----------
+ROS2 node for assembly 6D pose estimation using YOLO-based detection.
+Provides a GetTargetPose service that returns the 3D position and orientation
+of target objects detected in the camera feed.
+
+Main Features
+-------------
+- /get_target_pose service (GetTargetPose): returns 6D pose of detected object
+- YOLO-based object detection via INUVisionCall
+- Publishes /target_id_map for object class mapping
+- Publishes at configurable frequency (default 0.5s)
+
+Required Nodes
+--------------
+- Camera driver (RealSense or equivalent)
+- INUVisionCall / INUVisionLib (local vision backend)
+
+Notes
+-----
+
+Revision History
+----------------
+
+===============================================================================
+"""
+
 import json
 import time
 

@@ -1,3 +1,37 @@
+"""
+===============================================================================
+File        : vision_node_dis.py
+Package     : vision_pkg
+Author      : Jeho Yoon, Chaerin Seong, Dahan Lee, Donghyuk Jeong, Deokhui Han, Donggil Lee
+Created     : 2026-06-30
+Environment : Ubuntu 22.04, ROS2 Humble, Python 3.10
+
+Description
+-----------
+ROS2 vision node specialized for the disassembly (RECYCLE) pipeline.
+Uses vision_6d_manager to detect finished product poses and serves
+GetTargetPose requests from master_node_dis.
+
+Main Features
+-------------
+- /get_target_pose service (GetTargetPose): 6D pose of target finished product
+- Uses COMP_MODEL and DET_MODEL from vision_6d_manager for disassembly detection
+- Optimized model paths for disassembly object classes
+
+Required Nodes
+--------------
+- Camera driver (RealSense or equivalent)
+- vision_6d_manager : COMP_MODEL_PATH, DET_MODEL_PATH
+
+Notes
+-----
+
+Revision History
+----------------
+
+===============================================================================
+"""
+
 import rclpy
 from rclpy.node import Node
 from srvs_pkg.srv import GetTargetPose

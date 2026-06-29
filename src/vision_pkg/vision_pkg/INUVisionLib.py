@@ -1,3 +1,37 @@
+"""
+===============================================================================
+File        : INUVisionLib.py
+Package     : vision_pkg
+Author      : Jeho Yoon, Chaerin Seong, Dahan Lee, Donghyuk Jeong, Deokhui Han, Donggil Lee
+Created     : 2026-06-30
+Environment : Ubuntu 22.04, ROS2 Humble, Python 3.10
+
+Description
+-----------
+Low-level vision library that manages RealSense camera initialization,
+frame capture, and YOLO model inference for 6D pose estimation.
+Serves as the backend for INUVisionCall.
+
+Main Features
+-------------
+- RealSense camera initialization and streaming
+- YOLO detection model loading and inference
+- Depth-based 3D coordinate extraction
+- YAML-based camera calibration loading
+
+Required Nodes
+--------------
+- None (standalone library)
+
+Notes
+-----
+
+Revision History
+----------------
+
+===============================================================================
+"""
+
 import os
 import time
 import yaml

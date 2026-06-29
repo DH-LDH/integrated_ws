@@ -1,3 +1,37 @@
+"""
+===============================================================================
+File        : robot2_gpio_gripper_node.py
+Package     : hardware_pkg
+Author      : Jeho Yoon, Chaerin Seong, Dahan Lee, Donghyuk Jeong, Deokhui Han, Donggil Lee
+Created     : 2026-06-30
+Environment : Ubuntu 22.04, ROS2 Humble, Python 3.10
+
+Description
+-----------
+ROS2 node that controls the gripper of robot2 via Cobot GPIO signals.
+Sends digital output pulses through rbpodo to open or close the gripper
+without requiring a dedicated serial port.
+
+Main Features
+-------------
+- /robot2/control_gripper service (SetBool): True = grip, False = open
+- GPIO pulse control via rbpodo Cobot API
+- Configurable robot IP, service name, and pulse duration via ROS parameters
+
+Required Nodes
+--------------
+- rbpodo Cobot driver (robot2 connection, default IP: 10.0.2.8)
+
+Notes
+-----
+- Parameters: robot_ip (default: 10.0.2.8), service_name, pulse_time (default: 0.2s)
+
+Revision History
+----------------
+
+===============================================================================
+"""
+
 import time
 import threading
 

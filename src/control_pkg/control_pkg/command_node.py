@@ -1,12 +1,38 @@
 """
-command_node.py
-manager의 wb_task(Action)를 받아 work_type으로 조립/분해를 분배하는 노드.
+===============================================================================
+File        : command_node.py
+Package     : control_pkg
+Author      : Jeho Yoon, Chaerin Seong, Dahan Lee, Donghyuk Jeong, Deokhui Han, Donggil Lee
+Created     : 2026-06-30
+Environment : Ubuntu 22.04, ROS2 Humble, Python 3.10
 
-  PRODUCE  -> MasterNode            (master_node)      조립
-  RECYCLE  -> BatteryDualDisassembly(master_node_dis)  분해
+Description
+-----------
+Gateway node that receives wb_task actions from the manager and dispatches
+them to the appropriate handler based on work_type.
+Replaces the legacy mock_wb_node as the real workbench node while keeping
+the same manager-side interface.
 
-manager 쪽 인터페이스(wb_task)는 mock_wb_node와 동일하게 유지한다.
-즉, 이 노드는 기존 mock_wb_node를 대체하는 "진짜 워크벤치 노드"다.
+Main Features
+-------------
+- /wb_task Action server (WbTask): receives assembly and disassembly requests
+- PRODUCE → MasterNode (master_node) : assembly sequence
+- RECYCLE → BatteryDualDisassembly (master_node_dis) : disassembly sequence
+- Maintains the same interface as mock_wb_node for manager compatibility
+
+Required Nodes
+--------------
+- master_node     : MasterNode class (assembly)
+- master_node_dis : BatteryDualDisassembly class (disassembly)
+- manager node    : publishes /wb_task actions
+
+Notes
+-----
+
+Revision History
+----------------
+
+===============================================================================
 """
 
 import time

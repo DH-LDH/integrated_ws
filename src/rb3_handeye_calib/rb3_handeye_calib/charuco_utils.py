@@ -1,12 +1,35 @@
 """
-charuco_utils.py
-================
-ChArUco 보드 검출 및 카메라 기준 pose 추정 유틸리티.
+===============================================================================
+File        : charuco_utils.py
+Package     : rb3_handeye_calib
+Author      : Jeho Yoon, Chaerin Seong, Dahan Lee, Donghyuk Jeong, Deokhui Han, Donggil Lee
+Created     : 2026-06-30
+Environment : Ubuntu 22.04, ROS2 Humble, Python 3.10
 
-OpenCV 버전 차이 처리
----------------------
-* OpenCV >= 4.7  : cv2.aruco.CharucoDetector 사용 (권장)
-* OpenCV <  4.7  : detectMarkers → interpolateCornersCharuco → estimatePoseCharucoBoard
+Description
+-----------
+Utility module for ChArUco board detection and camera-frame pose estimation.
+Handles OpenCV version differences transparently for cross-version compatibility.
+
+Main Features
+-------------
+- ChArUco board detection (OpenCV >= 4.7: CharucoDetector; < 4.7: legacy API)
+- Camera-frame pose estimation from detected board corners
+- ArUco dictionary lookup by string name
+
+Required Nodes
+--------------
+- None (utility module, imported by other nodes)
+
+Notes
+-----
+- OpenCV >= 4.7: uses cv2.aruco.CharucoDetector (recommended)
+- OpenCV <  4.7: detectMarkers → interpolateCornersCharuco → estimatePoseCharucoBoard
+
+Revision History
+----------------
+
+===============================================================================
 """
 
 import cv2

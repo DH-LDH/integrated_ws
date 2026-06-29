@@ -1,3 +1,35 @@
+"""
+===============================================================================
+File        : decision_assembly_with_camera.launch.py
+Package     : vision_assembly_pkg
+Author      : Jeho Yoon, Chaerin Seong, Dahan Lee, Donghyuk Jeong, Deokhui Han, Donggil Lee
+Created     : 2026-06-30
+Environment : Ubuntu 22.04, ROS2 Humble, Python 3.10
+
+Description
+-----------
+Launch file that starts the birdseye-view camera driver together with
+the decision_assembly node for assembly planning.
+
+Main Features
+-------------
+- Camera launch (included from camera package)
+- decision_assembly (vision_assembly_pkg) : assembly decision logic
+- birdseye_assembly (vision_assembly_pkg) : birdseye object detection
+
+Required Nodes
+--------------
+- Camera driver (included via IncludeLaunchDescription)
+
+Notes
+-----
+
+Revision History
+----------------
+
+===============================================================================
+"""
+
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource

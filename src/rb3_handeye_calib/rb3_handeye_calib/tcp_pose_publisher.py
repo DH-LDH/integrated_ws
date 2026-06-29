@@ -1,31 +1,36 @@
 """
-tcp_pose_publisher.py
-=====================
-Rainbow Robotics RB3 TCP pose를 ROS2 topic으로 publish하는 노드.
+===============================================================================
+File        : tcp_pose_publisher.py
+Package     : rb3_handeye_calib
+Author      : Jeho Yoon, Chaerin Seong, Dahan Lee, Donghyuk Jeong, Deokhui Han, Donggil Lee
+Created     : 2026-06-30
+Environment : Ubuntu 22.04, ROS2 Humble, Python 3.10
 
-Published Topics
+Description
+-----------
+ROS2 node that reads the TCP pose from a Rainbow Robotics RB3 cobot via
+rbpodo and publishes it as ROS2 topics for use in hand-eye calibration.
+
+Main Features
+-------------
+- Publishes /<robot_name>/tcp_pose_array (Float64MultiArray): [x_mm, y_mm, z_mm, rx, ry, rz deg]
+- Publishes /<robot_name>/tcp_pose (PoseStamped): position in meters, orientation as quaternion
+- Dual fallback TCP read: CobotData.request_data() → SystemVariable
+- ROS parameters: robot_ip, robot_name, publish_rate, frame_id, euler_order
+
+Required Nodes
+--------------
+- rbpodo Cobot driver (robot connection)
+
+Notes
+-----
+- Default robot IP: 10.0.2.7, publish rate: 20 Hz
+- Falls back to SystemVariable read if CobotData fails
+
+Revision History
 ----------------
-/<robot_name>/tcp_pose_array  : std_msgs/Float64MultiArray
-    data = [x_mm, y_mm, z_mm, rx_deg, ry_deg, rz_deg]
 
-/<robot_name>/tcp_pose        : geometry_msgs/PoseStamped
-    frame_id = "base"
-    position 단위: meter
-    orientation: quaternion
-
-Parameters
-----------
-robot_ip     : str   – 로봇 IP (기본값 "10.0.2.7")
-robot_name   : str   – 로봇 이름 (기본값 "robot1")
-publish_rate : float – Hz (기본값 20.0)
-frame_id     : str   – base frame (기본값 "base")
-euler_order  : str   – Euler 순서 (기본값 "xyz")
-
-rbpodo TCP 읽기 방법
---------------------
-1차 시도: CobotData.request_data() → state.sdata.tcp_pos
-2차 시도: SystemVariable (SD_TCP_X, SD_TCP_Y, ...)
-둘 다 실패하면 WARNING 출력 후 노드 유지.
+===============================================================================
 """
 
 import rclpy

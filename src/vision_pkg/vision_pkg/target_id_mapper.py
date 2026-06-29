@@ -1,3 +1,36 @@
+"""
+===============================================================================
+File        : target_id_mapper.py
+Package     : vision_pkg
+Author      : Jeho Yoon, Chaerin Seong, Dahan Lee, Donghyuk Jeong, Deokhui Han, Donggil Lee
+Created     : 2026-06-30
+Environment : Ubuntu 22.04, ROS2 Humble, Python 3.10
+
+Description
+-----------
+ROS2 node that maintains a mapping from object IDs to class names and
+publishes it to /target_id_map for consumption by khj_point_node and
+other downstream nodes that need to correlate detections with birdseye data.
+
+Main Features
+-------------
+- Publishes /target_id_map (String): JSON dict {"id": "class_name", ...}
+- Receives ID-class mappings from vision pipeline
+- Provides update service or subscription to keep mapping current
+
+Required Nodes
+--------------
+- vision_node : source of object detection and ID assignments
+
+Notes
+-----
+
+Revision History
+----------------
+
+===============================================================================
+"""
+
 import json
 import time
 

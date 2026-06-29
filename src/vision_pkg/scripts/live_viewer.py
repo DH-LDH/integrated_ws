@@ -1,16 +1,37 @@
 #!/usr/bin/env python3
 """
-live_viewer.py
-==============
-vision_pkg의 VisionManager를 사용해 카메라를 지속 구동하고,
-감지된 모든 블록의 class_name, x/y_mm, yaw_deg를 화면에 오버레이한다.
+===============================================================================
+File        : live_viewer.py
+Package     : vision_pkg
+Author      : Jeho Yoon, Chaerin Seong, Dahan Lee, Donghyuk Jeong, Deokhui Han, Donggil Lee
+Created     : 2026-06-30
+Environment : Ubuntu 22.04, ROS2 Humble, Python 3.10
 
-실행:
-    cd /home/orinagx/integrated_ws
-    source install/setup.bash
-    python3 src/vision_pkg/scripts/live_viewer.py
+Description
+-----------
+Standalone live viewer script that continuously runs the camera using
+VisionManager and overlays detected block information (class_name, x/y_mm,
+yaw_deg) on the camera feed for real-time visual verification.
 
-종료: 'q' 키
+Main Features
+-------------
+- Continuous camera loop using vision_pkg VisionManager
+- Overlays class_name, x/y position (mm), and yaw (deg) on each detected block
+- Press 'q' to exit
+
+Required Nodes
+--------------
+- None (standalone script, does not require ROS2 runtime)
+
+Notes
+-----
+Usage: cd /home/orinagx/integrated_ws && source install/setup.bash
+       python3 src/vision_pkg/scripts/live_viewer.py
+
+Revision History
+----------------
+
+===============================================================================
 """
 
 import sys

@@ -1,18 +1,37 @@
 """
-transform_utils.py
-==================
-좌표 변환 유틸리티 모음.
+===============================================================================
+File        : transform_utils.py
+Package     : rb3_handeye_calib
+Author      : Jeho Yoon, Chaerin Seong, Dahan Lee, Donghyuk Jeong, Deokhui Han, Donggil Lee
+Created     : 2026-06-30
+Environment : Ubuntu 22.04, ROS2 Humble, Python 3.10
 
-단위 규칙
----------
-* translation : meter (m)  ←→  mm 변환 함수 제공
-* rotation    : degree 입력 → 내부적으로 radian 처리
-* Euler order : 기본값 'xyz' (extrinsic / fixed-axis)
-                Rainbow Robotics RB3의 TCP rx/ry/rz가 어떤 순서인지
-                실제 로봇에서 확인 후 euler_order를 맞춰야 합니다.
-                의심스러우면 'zyx'(RPY) / 'xyz' 둘 다 시도하고 결과를 비교하세요.
+Description
+-----------
+Coordinate transformation utility module used across the hand-eye calibration pipeline.
+Provides mm↔m conversion, Euler-to-rotation-matrix, and quaternion conversion functions
+with a scipy-free fallback for environments without scipy installed.
 
-scipy 없는 환경에서도 동작하는 fallback 구현을 포함합니다.
+Main Features
+-------------
+- mm ↔ meter translation conversion
+- Euler angles (deg) to rotation matrix (configurable order: xyz, zyx/RPY, etc.)
+- Rotation matrix to quaternion conversion
+- scipy-free fallback implementation
+
+Required Nodes
+--------------
+- None (utility module, imported by sample_collector and tcp_pose_publisher)
+
+Notes
+-----
+- Default Euler order: 'xyz' (extrinsic/fixed-axis)
+- Verify euler_order against actual RB3 TCP rx/ry/rz convention before use
+
+Revision History
+----------------
+
+===============================================================================
 """
 
 import math

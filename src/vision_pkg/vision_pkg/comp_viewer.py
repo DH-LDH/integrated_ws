@@ -1,10 +1,35 @@
 """
-comp_viewer.py — best_comp.pt 실시간 제품 확인 뷰어
+===============================================================================
+File        : comp_viewer.py
+Package     : vision_pkg
+Author      : Jeho Yoon, Chaerin Seong, Dahan Lee, Donghyuk Jeong, Deokhui Han, Donggil Lee
+Created     : 2026-06-30
+Environment : Ubuntu 22.04, ROS2 Humble, Python 3.10
 
-실행:
-    python3 comp_viewer.py
+Description
+-----------
+Standalone real-time viewer for verifying the component classification model
+(best_comp.pt). Displays live camera feed with YOLO detection overlays
+for visual confirmation of object class predictions.
 
-종료: 카메라 창에서 'q' 키
+Main Features
+-------------
+- Live camera feed with YOLO bounding box overlay
+- Uses best_comp.pt (component classification model)
+- Press 'q' in the camera window to exit
+
+Required Nodes
+--------------
+- None (standalone script, run directly with python3)
+
+Notes
+-----
+Usage: python3 comp_viewer.py
+
+Revision History
+----------------
+
+===============================================================================
 """
 
 import os

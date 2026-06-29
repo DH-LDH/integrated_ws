@@ -1,3 +1,37 @@
+"""
+===============================================================================
+File        : test.py
+Package     : control_pkg
+Author      : Jeho Yoon, Chaerin Seong, Dahan Lee, Donghyuk Jeong, Deokhui Han, Donggil Lee
+Created     : 2026-06-30
+Environment : Ubuntu 22.04, ROS2 Humble, Python 3.10
+
+Description
+-----------
+Test node for verifying robot joint trajectory commands.
+Publishes a single JointTrajectory message to the arm controller
+one second after startup to validate joint angle targets.
+
+Main Features
+-------------
+- Publishes to /arm_controller/joint_trajectory (JointTrajectory)
+- Single one-shot publish triggered by a 1-second timer
+- Used for manual joint angle verification during development
+
+Required Nodes
+--------------
+- arm_controller : /arm_controller/joint_trajectory
+
+Notes
+-----
+- If the robot does not move, check the actual topic name with 'ros2 topic list'
+
+Revision History
+----------------
+
+===============================================================================
+"""
+
 import rclpy
 from rclpy.node import Node
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint

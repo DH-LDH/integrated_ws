@@ -1,26 +1,36 @@
 """
-charuco_board_generator.py
-==========================
-ChArUco 보드를 A4 PNG 파일로 생성하는 ROS2 노드.
+===============================================================================
+File        : charuco_board_generator.py
+Package     : rb3_handeye_calib
+Author      : Jeho Yoon, Chaerin Seong, Dahan Lee, Donghyuk Jeong, Deokhui Han, Donggil Lee
+Created     : 2026-06-30
+Environment : Ubuntu 22.04, ROS2 Humble, Python 3.10
 
-Parameters
-----------
-squares_x        : int   – 가로 체스 칸 수     (기본 7)
-squares_y        : int   – 세로 체스 칸 수     (기본 5)
-square_length_mm : float – 체스 칸 한 변 (mm) (기본 30.0)
-marker_length_mm : float – ArUco 마커 한 변 (mm) (기본 22.0)
-dictionary       : str   – ArUco 사전       (기본 'DICT_4X4_50')
-dpi              : int   – 출력 DPI          (기본 300)
-output_path      : str   – 저장 경로         (기본 '/tmp/charuco_board.png')
+Description
+-----------
+ROS2 node that generates a ChArUco calibration board and saves it as a PNG file.
+Used as the first step in the hand-eye calibration pipeline.
 
-Usage
+Main Features
+-------------
+- Generates ChArUco board image with configurable grid size and marker dimensions
+- Saves output as PNG at a specified path (default: /tmp/charuco_board.png)
+- ROS parameters: squares_x, squares_y, square_length_mm, marker_length_mm, dictionary, dpi, output_path
+
+Required Nodes
+--------------
+- None (standalone utility node)
+
+Notes
 -----
-ros2 run rb3_handeye_calib charuco_board_generator \
-  --ros-args \
-  -p squares_x:=7 -p squares_y:=5 \
-  -p square_length_mm:=30.0 \
-  -p marker_length_mm:=22.0 \
-  -p output_path:='/tmp/charuco_board.png'
+Usage: ros2 run rb3_handeye_calib charuco_board_generator \
+         --ros-args -p squares_x:=7 -p squares_y:=5 \
+         -p square_length_mm:=30.0 -p marker_length_mm:=22.0
+
+Revision History
+----------------
+
+===============================================================================
 """
 
 import os

@@ -1,3 +1,40 @@
+"""
+===============================================================================
+File        : dis.launch.py
+Package     : launch_pkg
+Author      : Jeho Yoon, Chaerin Seong, Dahan Lee, Donghyuk Jeong, Deokhui Han, Donggil Lee
+Created     : 2026-06-30
+Environment : Ubuntu 22.04, ROS2 Humble, Python 3.10
+
+Description
+-----------
+Launch file for the disassembly (RECYCLE) pipeline.
+Starts all nodes required for the dual-robot disassembly workflow
+with configurable startup delays to ensure correct initialization order.
+
+Main Features
+-------------
+- robot_node               (control_pkg)  : dual robot motion control
+- gripper_node             (hardware_pkg) : robot1 serial gripper
+- robot2_gpio_gripper_node (hardware_pkg) : robot2 GPIO gripper
+- vision_node_dis          (vision_pkg)   : disassembly-specific vision inference
+- master_node_dis          (control_pkg)  : disassembly sequence orchestration
+- command_node             (control_pkg)  : task dispatcher (RECYCLE)
+
+Required Nodes
+--------------
+- All nodes listed above are launched by this file
+
+Notes
+-----
+- vision_node_dis starts 2s before master_node_dis to ensure model is loaded
+
+Revision History
+----------------
+
+===============================================================================
+"""
+
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, TimerAction
 from launch.conditions import IfCondition
@@ -48,7 +85,7 @@ def generate_launch_description():
 
         DeclareLaunchArgument(
             'run_master_node_dis',
-            default_value='true',
+            default_value='false',
             description='Run control_pkg master_node_dis'
         ),
 

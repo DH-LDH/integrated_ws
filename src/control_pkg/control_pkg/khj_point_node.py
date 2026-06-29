@@ -1,19 +1,39 @@
 """
-/target_id_map      : {"1": "block", "2": "component", ...}
-/birdseye_assembly/object_positions
-                    : {"objects": [{"id":1, "offset_cm":{"x":..,"y":..}, ...}, ...]}
+===============================================================================
+File        : khj_point_node.py
+Package     : control_pkg
+Author      : Jeho Yoon, Chaerin Seong, Dahan Lee, Donghyuk Jeong, Deokhui Han, Donggil Lee
+Advisor     : Hyeongjin Kim
+Created     : 2026-06-30
+Environment : Ubuntu 22.04, ROS2 Humble, Python 3.10
 
-두 토픽에서 id가 일치하는 항목의 class_name, 카메라 기준 dist_cm, offset_cm 을 묶어
-/khj_point 로 발행한다.
+Description
+-----------
+Aggregation node that merges /target_id_map and /birdseye_assembly/object_positions
+by matching object IDs, then publishes the combined result (class_name, dist_cm,
+offset_cm) to /khj_point for downstream assembly planning.
 
-카메라는 버드아이뷰 중앙점(probe_bird)보다 robot1 X 양수 방향 14cm.
-버드아이 offset_cm 기준: camera = center + (x=+14 cm, y=0 cm)
+Main Features
+-------------
+- Subscribes to /target_id_map and /birdseye_assembly/object_positions
+- Matches objects by ID and merges class_name + offset_cm data
+- Publishes merged result to /khj_point as JSON string
+- Camera offset correction: birdseye camera is +14 cm in robot1 X direction
 
-발행 형식:
-{
-  "1": {"class_name": "block",     "dist_cm": 15.2, "offset_cm": {"x": -29.1, "y": 6.9}},
-  "2": {"class_name": "component", "dist_cm": 22.1, "offset_cm": {"x": -18.0, "y": -4.3}}
-}
+Required Nodes
+--------------
+- birdseye_assembly node : /birdseye_assembly/object_positions
+- target_id_map publisher : /target_id_map
+
+Notes
+-----
+Published format:
+  {"1": {"class_name": "block", "dist_cm": 15.2, "offset_cm": {"x": -29.1, "y": 6.9}}, ...}
+
+Revision History
+----------------
+
+===============================================================================
 """
 
 import json

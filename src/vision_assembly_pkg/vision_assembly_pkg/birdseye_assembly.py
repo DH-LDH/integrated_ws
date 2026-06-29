@@ -1,3 +1,38 @@
+"""
+===============================================================================
+File        : birdseye_assembly.py
+Package     : vision_assembly_pkg
+Author      : Jeho Yoon, Chaerin Seong, Dahan Lee, Donghyuk Jeong, Deokhui Han, Donggil Lee
+Advisor     : Hyeongjin Kim
+Created     : 2026-06-30
+Environment : Ubuntu 22.04, ROS2 Humble, Python 3.10
+
+Description
+-----------
+ROS2 node that processes birdseye-view camera images to detect Lego block
+positions and publishes object location data for assembly planning.
+
+Main Features
+-------------
+- Subscribes to birdseye camera image topic
+- Detects block positions within ROI polygon (from shared_config)
+- Publishes /birdseye_assembly/object_positions as JSON string
+- Provides /birdseye_assembly/reset service (Trigger) to clear state
+
+Required Nodes
+--------------
+- Camera driver : birdseye camera image topic
+- shared_config : ROI_POLYGON definition
+
+Notes
+-----
+
+Revision History
+----------------
+
+===============================================================================
+"""
+
 import json
 import math
 

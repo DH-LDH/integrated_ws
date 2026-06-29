@@ -1,3 +1,38 @@
+"""
+===============================================================================
+File        : vision_6d_manager.py
+Package     : vision_pkg
+Author      : Jeho Yoon, Chaerin Seong, Dahan Lee, Donghyuk Jeong, Deokhui Han, Donggil Lee
+Created     : 2026-06-30
+Environment : Ubuntu 22.04, ROS2 Humble, Python 3.10
+
+Description
+-----------
+Core vision inference manager for 6D pose estimation.
+Loads YOLO detection and component classification models, runs inference
+on camera frames, and returns structured pose results to vision nodes.
+
+Main Features
+-------------
+- YOLO-based object detection (DET_MODEL_PATH)
+- Component classification model (COMP_MODEL_PATH)
+- 6D pose (x, y, z, yaw) estimation from depth + detection results
+- Model path constants for assembly and disassembly pipelines
+
+Required Nodes
+--------------
+- Camera driver (provides frames internally via INUVisionLib)
+
+Notes
+-----
+- Sets YOLO_CONFIG_DIR and MPLCONFIGDIR to /tmp to avoid permission issues
+
+Revision History
+----------------
+
+===============================================================================
+"""
+
 import os
 import time
 from dataclasses import dataclass

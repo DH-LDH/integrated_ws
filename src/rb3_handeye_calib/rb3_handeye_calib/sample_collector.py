@@ -1,37 +1,38 @@
 """
-sample_collector.py
-===================
-교정 샘플(TCP pose + ChArUco pose)을 수집하는 ROS2 노드.
+===============================================================================
+File        : sample_collector.py
+Package     : rb3_handeye_calib
+Author      : Jeho Yoon, Chaerin Seong, Dahan Lee, Donghyuk Jeong, Deokhui Han, Donggil Lee
+Created     : 2026-06-30
+Environment : Ubuntu 22.04, ROS2 Humble, Python 3.10
 
-Subscribed Topics
------------------
-/camera/camera/color/image_raw   : sensor_msgs/Image
-/camera/camera/color/camera_info : sensor_msgs/CameraInfo
-/<robot_name>/tcp_pose_array     : std_msgs/Float64MultiArray
-                                   data = [x_mm,y_mm,z_mm,rx_deg,ry_deg,rz_deg]
+Description
+-----------
+ROS2 node that collects hand-eye calibration samples by pairing TCP poses
+from the robot with ChArUco board poses detected from the camera image.
+Saves collected samples to a YAML file for use by handeye_solver.
 
-Services (Provided)
---------------------
-/handeye/capture_sample          : std_srvs/srv/Trigger
-    → 현재 프레임에서 샘플을 캡처합니다.
-      성공 시 samples/<session>/samples.yaml 에 추가.
-      실패 시 message에 사유 반환.
+Main Features
+-------------
+- Subscribes to camera image, camera_info, and TCP pose topics
+- /handeye/capture_sample (Trigger): captures one TCP + ChArUco pose pair
+- /handeye/reset_samples  (Trigger): clears all samples in current session
+- Saves annotated images and samples.yaml to session directory
 
-/handeye/reset_samples           : std_srvs/srv/Trigger
-    → 현재 세션 샘플 전부 삭제 후 초기화.
+Required Nodes
+--------------
+- Camera driver : /camera/camera/color/image_raw, /camera/camera/color/camera_info
+- tcp_pose_publisher : /<robot_name>/tcp_pose_array
 
-Parameters
-----------
-robot_name      : str   – 로봇 이름 (기본 'robot1')
-session_dir     : str   – 샘플 저장 디렉토리 (기본 '~/handeye_samples/<timestamp>')
-squares_x       : int   – (기본 7)
-squares_y       : int   – (기본 5)
-square_length_mm: float – (기본 30.0)
-marker_length_mm: float – (기본 22.0)
-dictionary      : str   – (기본 'DICT_4X4_50')
-min_corners     : int   – 최소 ChArUco 코너 수 (기본 8)
-euler_order     : str   – (기본 'xyz')
-save_annotated  : bool  – annotated 이미지 저장 여부 (기본 True)
+Notes
+-----
+- Parameters: robot_name, session_dir, squares_x/y, square/marker_length_mm,
+              dictionary, min_corners, euler_order, save_annotated
+
+Revision History
+----------------
+
+===============================================================================
 """
 
 import os

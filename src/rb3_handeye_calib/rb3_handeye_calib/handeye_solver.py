@@ -1,33 +1,38 @@
 """
-handeye_solver.py
-=================
-samples.yaml 를 읽어 cv2.calibrateHandEye 를 호출하고
-result_handeye.yaml 을 저장하는 ROS2 노드.
+===============================================================================
+File        : handeye_solver.py
+Package     : rb3_handeye_calib
+Author      : Jeho Yoon, Chaerin Seong, Dahan Lee, Donghyuk Jeong, Deokhui Han, Donggil Lee
+Created     : 2026-06-30
+Environment : Ubuntu 22.04, ROS2 Humble, Python 3.10
 
-Eye-in-hand 관계
-----------------
-T_cam2gripper (camera in gripper frame) 을 구한다.
+Description
+-----------
+ROS2 node that reads samples.yaml collected by sample_collector and solves
+the eye-in-hand calibration problem using cv2.calibrateHandEye.
+Saves the result T_cam2gripper matrix to result_handeye.yaml.
 
-calibrateHandEye 에 필요한 쌍
---------------------------------
-R_gripper2base, t_gripper2base  ← TCP pose (로봇 FK)
-R_target2cam,   t_target2cam   ← ChArUco board 검출 pose
+Main Features
+-------------
+- Reads TCP pose + ChArUco pose pairs from samples.yaml
+- Solves eye-in-hand: T_cam2gripper (camera in gripper frame)
+- Supports multiple methods: Tsai, Park, Horaud, Andreff, Daniilidis
+- ROS parameters: samples_yaml, output_yaml, method, euler_order
 
-최소 샘플 수: 3개 (권장 15개 이상)
+Required Nodes
+--------------
+- None (run after sample collection is complete)
 
-Parameters
-----------
-samples_yaml  : str  – 샘플 파일 경로
-output_yaml   : str  – 결과 저장 경로 (기본: samples_yaml 와 같은 디렉토리)
-method        : str  – Tsai|Park|Horaud|Andreff|Daniilidis (기본 'Tsai')
-euler_order   : str  – TCP Euler 순서 (기본 'xyz')
-
-Usage
+Notes
 -----
-ros2 run rb3_handeye_calib handeye_solver \
-  --ros-args \
-  -p samples_yaml:=/home/user/handeye_samples/20240601_120000/samples.yaml \
-  -p method:=Tsai
+- Minimum 3 samples required; 15+ recommended for accuracy
+- Usage: ros2 run rb3_handeye_calib handeye_solver \
+           --ros-args -p samples_yaml:=<path> -p method:=Tsai
+
+Revision History
+----------------
+
+===============================================================================
 """
 
 import os

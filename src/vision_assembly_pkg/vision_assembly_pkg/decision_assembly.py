@@ -1,3 +1,39 @@
+"""
+===============================================================================
+File        : decision_assembly.py
+Package     : vision_assembly_pkg
+Author      : Jeho Yoon, Chaerin Seong, Dahan Lee, Donghyuk Jeong, Deokhui Han, Donggil Lee
+Advisor     : Hyeongjin Kim
+Created     : 2026-06-30
+Environment : Ubuntu 22.04, ROS2 Humble, Python 3.10
+
+Description
+-----------
+ROS2 node that determines assembly actions based on birdseye-view
+block detections. Tracks block counts over time using a sliding window
+and publishes assembly decisions to downstream nodes.
+
+Main Features
+-------------
+- Subscribes to birdseye camera image and /birdseye_assembly/object_positions
+- Temporal smoothing via sliding window (deque + Counter)
+- Publishes assembly decisions and block layout information
+- Provides /decision_assembly/reset service
+
+Required Nodes
+--------------
+- birdseye_assembly : /birdseye_assembly/object_positions
+- Camera driver     : birdseye camera image topic
+
+Notes
+-----
+
+Revision History
+----------------
+
+===============================================================================
+"""
+
 import argparse
 import json
 import os

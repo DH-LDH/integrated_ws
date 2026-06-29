@@ -1,3 +1,38 @@
+"""
+===============================================================================
+File        : gripper_node.py
+Package     : hardware_pkg
+Author      : Jeho Yoon, Chaerin Seong, Dahan Lee, Donghyuk Jeong, Deokhui Han, Donggil Lee
+Created     : 2026-06-30
+Environment : Ubuntu 22.04, ROS2 Humble, Python 3.10
+
+Description
+-----------
+ROS2 node that controls the serial-connected gripper for robot1.
+Exposes a SetBool service to open or close the gripper via UART commands
+sent to /dev/gripper at 115200 baud.
+
+Main Features
+-------------
+- /control_gripper service (SetBool): True = grip, False = open
+- Serial communication with gripper hardware over /dev/gripper
+- Thread-safe serial access with lock
+- Result polling with configurable timeout
+
+Required Nodes
+--------------
+- None (hardware driver node)
+
+Notes
+-----
+- Device path: /dev/gripper, baud: 115200
+
+Revision History
+----------------
+
+===============================================================================
+"""
+
 import rclpy
 from rclpy.node import Node
 from std_srvs.srv import SetBool
