@@ -339,6 +339,15 @@ class DualRobotNode(Node):
         self.L_ACC = 1500
         self.get_logger().info("Dual Robot Node Ready")
 
+        # 노드 시작 시 양쪽 로봇을 END 자세로 이동
+        for robot_name, handle in self.robots.items():
+            try:
+                handle["robot"].move_j(handle["rc"], handle["end_joint"], 255, 255)
+                self.wait_move(robot_name, "END (init)")
+                self.get_logger().info(f"{robot_name} → END 자세 완료")
+            except Exception as e:
+                self.get_logger().warn(f"{robot_name} END 초기화 실패: {e}")
+
     def wait_move(self, robot_name, name="MOVE"):
         handle = self.robots[robot_name]
         robot = handle["robot"]

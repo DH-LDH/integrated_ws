@@ -1120,7 +1120,6 @@ class BatteryDualDisassembly(Node):
         """robot1: 추가 상승으로 상단 블록 강제 분리"""
         self.get_logger().info(f"[PULL] 강제 분리: {top_label}")
         self.move_z(self.cli_r1, self.PULL_UP)
-        self.sleep()
         return True
 
     def robot2_return_home_holding(self, bottom_label: str) -> bool:
@@ -1425,7 +1424,6 @@ class BatteryDualDisassembly(Node):
         self.get_logger().info(f"[SEP] robot2: separation_joint 이동 ({mid_label} 그립 유지)")
         if not self.send_pose(self.cli_r2, "SEPARATION"):
             return False
-        self.sleep()
 
         self.get_logger().info(f"[GRIP] robot1: drop_after_grip_joint → {bot_label} 그립")
         if not self.send_pose(self.cli_r1, "DROP_AFTER_GRIP"):
@@ -1508,7 +1506,6 @@ class BatteryDualDisassembly(Node):
         if not self.send_pose(self.cli_r1, "CENTER"):
             self.get_logger().error("robot1: CENTER 실패")
             return False
-        self.sleep()
         self.set_gripper1(False)                    # 4층 초록 내려놓기
 
         # Z 이동 후 3층 블록 파지 — center_z_mm 파라미터로 조정 가능
@@ -1569,7 +1566,6 @@ class BatteryDualDisassembly(Node):
         if not self.send_pose(self.cli_r1, "CENTER"):
             self.get_logger().error("robot1: CENTER 실패")
             return False
-        self.sleep()
         self.set_gripper1(False)                    # 4층 초록 내려놓기
 
         # Z 이동 → 손목 90° 회전 → 3층 블록 파지 → SEPARATION2
