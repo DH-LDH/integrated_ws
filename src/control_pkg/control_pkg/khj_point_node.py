@@ -79,6 +79,10 @@ class KhjPointNode(Node):
 
     def _publish(self):
         if not self._id_map or not self._bird_objs:
+            self.get_logger().warn(
+                f"[KHJ] 발행 스킵: id_map={len(self._id_map)}개, bird_objs={len(self._bird_objs)}개",
+                throttle_duration_sec=5.0,
+            )
             return
 
         matched = {}
@@ -94,6 +98,12 @@ class KhjPointNode(Node):
 
         if matched:
             self._pub.publish(String(data=json.dumps(matched, ensure_ascii=False)))
+        else:
+            self.get_logger().warn(
+                f"[KHJ] 매칭 없음: id_map 키={list(self._id_map.keys())}, "
+                f"bird_objs 키={list(self._bird_objs.keys())}",
+                throttle_duration_sec=5.0,
+            )
 
 
 def main(args=None):

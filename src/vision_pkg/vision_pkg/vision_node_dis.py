@@ -19,6 +19,7 @@ class VisionNodeDis(Node):
         self.declare_parameter('seg_model_path',  SEG_MODEL_PATH)
         self.declare_parameter('comp_model_path', COMP_MODEL_PATH)
         self.declare_parameter('visualize', False)
+        self.declare_parameter('camera_serial', '332322072441')
 
         self.vision     = None
         self.init_error = None
@@ -29,6 +30,7 @@ class VisionNodeDis(Node):
                 seg_model_path=self.get_parameter('seg_model_path').value,
                 comp_model_path=self.get_parameter('comp_model_path').value,
                 visualize=bool(self.get_parameter('visualize').value),
+                device_serial=self.get_parameter('camera_serial').value,
             )
             self.get_logger().info('[VISION_DIS] 초기화 완료 (6D 앙상블)')
         except Exception as e:

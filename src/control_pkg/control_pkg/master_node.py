@@ -4482,83 +4482,149 @@ class MasterNode(Node):
     #     self.get_logger().warn("저장된 2x2_yellow 위치도 없어 아이스크림 최종 결합 실패.")
 
 
+    # def build_ice_cream(self):  # 이전 시퀀스 (주석 보존)
+    #     self.get_logger().info(
+    #         "[아이스크림] 새 시퀀스: "
+    #         "2x2_red -> 4x2_yellow(y+1.0), "
+    #         "2x2_blue -> 4x2_yellow(y-1.0), "
+    #         "2x2_green -> 2x2_blue(y+1.0) 후 그리퍼 유지, "
+    #         "2x2_yellow 최종 결합"
+    #     )
+
+    #     self.get_logger().info("[Phase 1] 2x2_red 파지")
+    #     if not self.pick_target("2x2_red"):
+    #         self.get_logger().warn("2x2_red 파지 실패. 아이스크림 조립 취소.")
+    #         return
+
+    #     self.get_logger().info(
+    #         "[Phase 2] 들고 있는 2x2_red -> 4x2_yellow 결합 "
+    #         "(offset_studs_y=+1.0)"
+    #     )
+    #     if not self.visual_insert(
+    #         "4x2_yellow",
+    #         layer_index=0.7,
+    #         offset_studs_y=1.0,
+    #         open_after_insert=True,
+    #     ):
+    #         self.get_logger().warn("4x2_yellow 인식/결합 실패. 아이스크림 조립 취소.")
+    #         return
+
+    #     self.get_logger().info("[Phase 3] 2x2_blue 파지")
+    #     if not self.pick_target("2x2_blue"):
+    #         self.get_logger().warn("2x2_blue 파지 실패. 아이스크림 조립 취소.")
+    #         return
+
+    #     self.get_logger().info(
+    #         "[Phase 4] 들고 있는 2x2_blue -> 2x2_red 옆에 결합 "
+    #         "(offset_studs_y=-2.0)"
+    #     )
+    #     if not self.visual_insert(
+    #         "2x2_red",
+    #         layer_index=0.5,
+    #         offset_studs_y=-2.0,
+    #         khj_scan_class="4x2_yellow",
+    #         open_after_insert=True,
+    #     ):
+    #         self.get_logger().warn("2x2_red 인식/결합 실패. 아이스크림 조립 취소.")
+    #         return
+
+    #     self.get_logger().info("[Phase 5] 2x2_green 파지")
+    #     if not self.pick_target("2x2_green"):
+    #         self.get_logger().warn("2x2_green 파지 실패. 아이스크림 조립 취소.")
+    #         return
+
+    #     self.get_logger().info(
+    #         "[Phase 6] 들고 있는 2x2_green -> 2x2_blue 결합 "
+    #         "(offset_studs_y=+1.0, 그리퍼 유지)"
+    #     )
+    #     if not self.visual_insert(
+    #         "2x2_blue",
+    #         layer_index=1.4,
+    #         offset_studs_y=1.0,
+    #         release_gripper=False,
+    #         khj_scan_class="4x2_yellow",
+    #     ):
+    #         self.get_logger().warn("2x2_blue 인식/결합 실패. 아이스크림 조립 취소.")
+    #         return
+
+    #     self.get_logger().info("[Phase 7] 최종 결합: 현재 조립체 -> 2x2_yellow")
+
+    #     if self.visual_insert(
+    #         "2x2_yellow",
+    #         layer_index=2.5,
+    #         release_gripper=True,
+    #     ):
+    #         self.assembly_completed = True
+    #         self.get_logger().info("[완료] 아이스크림")
+    #         return
+
+    #     self.get_logger().warn("[Phase 7] 2x2_yellow 인식 실패. 아이스크림 최종 결합 실패.")
+
     def build_ice_cream(self):
         self.get_logger().info(
-            "[아이스크림] 새 시퀀스: "
-            "2x2_red -> 4x2_yellow(y+1.0), "
-            "2x2_blue -> 4x2_yellow(y-1.0), "
-            "2x2_green -> 2x2_blue(y+1.0) 후 그리퍼 유지, "
-            "2x2_yellow 최종 결합"
+            "[아이스크림] 시퀀스: "
+            "2x2_green 파지 -> 2x2_red(y-1.0, L0.7) 그리퍼유지 -> "
+            "2x2_blue(y+1.0, L0.7) 그리퍼유지 -> "
+            "4x2_yellow(L1.7) 그리퍼유지 -> 2x2_yellow(L2.7) 완료"
         )
 
-        self.get_logger().info("[Phase 1] 2x2_red 파지")
-        if not self.pick_target("2x2_red"):
-            self.get_logger().warn("2x2_red 파지 실패. 아이스크림 조립 취소.")
-            return
-
-        self.get_logger().info(
-            "[Phase 2] 들고 있는 2x2_red -> 4x2_yellow 결합 "
-            "(offset_studs_y=+1.0)"
-        )
-        if not self.visual_insert(
-            "4x2_yellow",
-            layer_index=0.7,
-            offset_studs_y=1.0,
-            open_after_insert=True,
-        ):
-            self.get_logger().warn("4x2_yellow 인식/결합 실패. 아이스크림 조립 취소.")
-            return
-
-        self.get_logger().info("[Phase 3] 2x2_blue 파지")
-        if not self.pick_target("2x2_blue"):
-            self.get_logger().warn("2x2_blue 파지 실패. 아이스크림 조립 취소.")
-            return
-
-        self.get_logger().info(
-            "[Phase 4] 들고 있는 2x2_blue -> 2x2_red 옆에 결합 "
-            "(offset_studs_y=-2.0)"
-        )
-        if not self.visual_insert(
-            "2x2_red",
-            layer_index=0.5,
-            offset_studs_y=-2.0,
-            khj_scan_class="4x2_yellow",
-            open_after_insert=True,
-        ):
-            self.get_logger().warn("2x2_red 인식/결합 실패. 아이스크림 조립 취소.")
-            return
-
-        self.get_logger().info("[Phase 5] 2x2_green 파지")
+        self.get_logger().info("[Phase 1] 2x2_green 파지")
         if not self.pick_target("2x2_green"):
             self.get_logger().warn("2x2_green 파지 실패. 아이스크림 조립 취소.")
             return
 
         self.get_logger().info(
-            "[Phase 6] 들고 있는 2x2_green -> 2x2_blue 결합 "
-            "(offset_studs_y=+1.0, 그리퍼 유지)"
+            "[Phase 2] 들고 있는 2x2_green -> 2x2_red 결합 "
+            "(offset_studs_y=-1.0, layer_index=0.7, 그리퍼 유지)"
+        )
+        if not self.visual_insert(
+            "2x2_red",
+            layer_index=0.7,
+            offset_studs_y=-1.0,
+            release_gripper=False,
+        ):
+            self.get_logger().warn("2x2_red 인식/결합 실패. 아이스크림 조립 취소.")
+            return
+
+        self.get_logger().info(
+            "[Phase 3] 들고 있는 조립체 -> 2x2_blue 결합 "
+            "(offset_studs_y=+1.0, layer_index=0.7, 그리퍼 유지)"
         )
         if not self.visual_insert(
             "2x2_blue",
-            layer_index=1.4,
+            layer_index=0.7,
             offset_studs_y=1.0,
             release_gripper=False,
-            khj_scan_class="4x2_yellow",
         ):
             self.get_logger().warn("2x2_blue 인식/결합 실패. 아이스크림 조립 취소.")
             return
 
-        self.get_logger().info("[Phase 7] 최종 결합: 현재 조립체 -> 2x2_yellow")
+        self.get_logger().info(
+            "[Phase 4] 들고 있는 조립체 -> 4x2_yellow 결합 "
+            "(layer_index=1.7, 그리퍼 유지)"
+        )
+        if not self.visual_insert(
+            "4x2_yellow",
+            layer_index=1.7,
+            release_gripper=False,
+        ):
+            self.get_logger().warn("4x2_yellow 인식/결합 실패. 아이스크림 조립 취소.")
+            return
 
+        self.get_logger().info(
+            "[Phase 5] 최종 결합: 들고 있는 조립체 -> 2x2_yellow "
+            "(layer_index=2.7)"
+        )
         if self.visual_insert(
             "2x2_yellow",
-            layer_index=2.5,
+            layer_index=2.7,
             release_gripper=True,
         ):
             self.assembly_completed = True
             self.get_logger().info("[완료] 아이스크림")
             return
 
-        self.get_logger().warn("[Phase 7] 2x2_yellow 인식 실패. 아이스크림 최종 결합 실패.")
+        self.get_logger().warn("[Phase 5] 2x2_yellow 인식 실패. 아이스크림 최종 결합 실패.")
 
 
 
@@ -4652,8 +4718,8 @@ class MasterNode(Node):
         # Phase 5:
         #   최종 2x2_yellow 위에 꽂을 때 사용할 y offset
         # ------------------------------------------------------------- #
-        big_tree_4x2_green_offset_y = -1.0
-        big_tree_2x2_green_offset_y = 2.0
+        big_tree_4x2_green_offset_y = 1.0
+        big_tree_2x2_green_offset_y = -2.0
         big_tree_final_yellow_offset_y = 0.0
 
         # ------------------------------------------------------------- #
@@ -4709,7 +4775,7 @@ class MasterNode(Node):
         if not self.visual_insert(
             "4x2_green",
             layer_index=1.7,
-            offset_studs_y=-1.0,
+            offset_studs_y=1.0,
             release_gripper=False,
             pre_khj_scan=True,
             local_id=1,
@@ -4733,8 +4799,8 @@ class MasterNode(Node):
 
         if not self.visual_insert(
             "2x2_green",
-            layer_index=1.7,
-            offset_studs_y=2.0,
+            layer_index=1.6,
+            offset_studs_y=-2.0,
             release_gripper=False,
             pre_khj_scan=True,
             local_id=1,

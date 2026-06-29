@@ -71,6 +71,7 @@ class Vision6DPoseManager:
         match_distance_px=40.0,
         visualize=False,
         visualize_window="6D Pose (Ensemble Mode)",
+        device_serial=None,
     ):
         self.logger             = logger
         self.det_model_path     = det_model_path
@@ -81,6 +82,7 @@ class Vision6DPoseManager:
         self.match_distance_px  = float(match_distance_px)
         self.visualize          = bool(visualize)
         self.visualize_window   = str(visualize_window)
+        self.device_serial      = str(device_serial) if device_serial else None
 
         self._check_model_file(self.det_model_path)
         self._check_model_file(self.seg_model_path)
@@ -92,6 +94,8 @@ class Vision6DPoseManager:
 
         self.pipeline = rs.pipeline()
         config = rs.config()
+        if self.device_serial:
+            config.enable_device(self.device_serial)
         config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
         config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
         profile = self.pipeline.start(config)

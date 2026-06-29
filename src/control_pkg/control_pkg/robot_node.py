@@ -237,13 +237,14 @@ ROBOT_CONFIGS = {
         "ip": "10.0.2.7",
         "cam_x_off": -65.152, # 조립용
         "cam_y_off": -34.078, # 조립용
-        "dis_cam_x_off": -52.5, # 바깥으로 가고싶으면 음수, 몸쪽으로 오고 싶으면 양수
-        "dis_cam_y_off": -34.485, #-29.485, #32.485
+        "dis_cam_x_off": -65.152 , # -52.5 바깥으로 가고싶으면 음수, 몸쪽으로 오고 싶으면 양수
+        "dis_cam_y_off": -34.078, #-34.485, -29.485, #32.485
         "home_joint": [-90.0, 6.67, 35.34, 0.0, 138.0, 0.0],
         "end_joint": [-90.0, -65.0, 110.0, 0.0, 140.0, 0.0],
         "end_joint": [-90.0, -65.0, 110.0, 0.0, 140.0, 0.0],
-        "center_joint": [-108.2, -10.14, 104.67, 0.0, 85.48, -18.2],
+        "center_joint": [-108.2, -9.91, 106.41, 0.0, 83.51, -18.2],
         "separation_joint": [-91.02, 21.07, 26.68, 0.11, 131.03, -91.23],
+        "separation_joint2": [-91.02, 21.07, 26.68, 0.11, 131.03, -1.23],
         "drop_joint": [-90.0, 19.26, 74.23, 0.02, 86.51, 0.0],
         "drop_joint2": [-100.03, 20.95, 72.05, 0.02, 87.00, -10.03],
         "drop_joint3": [-108.77, 25.01, 66.67, 0.02, 88.32, -18.76],
@@ -253,7 +254,7 @@ ROBOT_CONFIGS = {
         "assembly_drop_joint_m": [-157.95, -0.30, 111.25, 60.29, 60.10, -185.80],
         "assembly_drop_joint_l": [-157.95, -0.71, 110.69, 59.81, 60.58, -184.84],
         "drop_after_home_joint": [-90.70, -103.8, 144.2, 2.59, 51.69, -4.05],
-        "drop_after_grip_joint": [-90.4, -57.11, 142.24, 9.11, 4.71, -12.0],
+        "drop_after_grip_joint": [-91.69, -57.11, 142.24, 9.11, 4.71, -12.0],
         "drop_after_drop_joint": [-100.02, -16.63, 141.86, 6.93, -15.10, -10.03],
 
     },
@@ -300,8 +301,9 @@ class DualRobotNode(Node):
                 "assembly_joint": np.array(cfg.get("assembly_joint", cfg["home_joint"]), dtype=float),
                 
                 "separation_waypoint": np.array(cfg["separation_waypoint"], dtype=float) if "separation_waypoint" in cfg else None,
-                
+
                 "separation_joint": np.array(cfg.get("separation_joint", cfg["home_joint"]), dtype=float),
+                "separation_joint2": np.array(cfg.get("separation_joint2", cfg.get("separation_joint", cfg["home_joint"])), dtype=float),
                 "center_joint": np.array(cfg.get("center_joint", cfg["home_joint"]), dtype=float),
                 "drop_joint": np.array(cfg.get("drop_joint", cfg["home_joint"]), dtype=float),
                 "drop_joint2": np.array(cfg.get("drop_joint2", cfg.get("drop_joint", cfg["home_joint"])), dtype=float),
@@ -456,9 +458,13 @@ class DualRobotNode(Node):
                 if handle.get("separation_waypoint") is not None:
                     robot.move_j(rc, handle["separation_waypoint"], 255, 255)
                     self.wait_move(robot_name, "SEPARATION_WAYPOINT")
-                
+
                 robot.move_j(rc, handle["separation_joint"], 255, 255)
                 self.wait_move(robot_name, "SEPARATION")
+
+            elif req.target_size == "SEPARATION2":
+                robot.move_j(rc, handle["separation_joint2"], 255, 255)
+                self.wait_move(robot_name, "SEPARATION2")
 
             elif req.target_size == "CENTER":
                 robot.move_j(rc, handle["center_joint"], 255, 255)

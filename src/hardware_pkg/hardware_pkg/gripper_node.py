@@ -16,7 +16,7 @@ class GripperNode(Node):
 
         try:
             # timeout=0.5: readline 한 번당 최대 대기. 실제 완료 판정은 _wait_for_result에서 함
-            self.ser = serial.Serial("/dev/ttyACM0", 115200, timeout=0.5)
+            self.ser = serial.Serial("/dev/gripper", 115200, timeout=0.5)
             self.get_logger().info("✅ Gripper Serial Connected. 초기 open 확인 중...")
 
             # Case 1: 시리얼 연결 시 Arduino가 리셋되면 setup()에서 자동 open → [OPEN] 출력
