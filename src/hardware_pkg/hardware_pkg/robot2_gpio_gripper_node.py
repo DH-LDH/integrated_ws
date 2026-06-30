@@ -52,7 +52,7 @@ class Robot2GpioGripperNode(Node):
         ).value
         self.pulse_time = float(self.declare_parameter("pulse_time", 0.2).value)
         # 펄스 후 그리퍼 기계적 동작 완료 대기 (이 값만큼 대기 후 서비스 반환)
-        self.grip_settle_time = float(self.declare_parameter("grip_settle_time", 0.5).value)
+        self.grip_settle_time = float(self.declare_parameter("grip_settle_time", 0.7).value)
 
         self.robot = rb.Cobot(self.robot_ip)
         self.rc = rb.ResponseCollector()

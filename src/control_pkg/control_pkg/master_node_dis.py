@@ -50,13 +50,13 @@ Z_OFF_DEFAULT         = -85.0   # 비전 Z → 엔드이펙터 Z 변환 오프�
 Z_MARGIN_DEFAULT      =  20.0   # 블록 접근 전 안전 여유 거리 (mm)
 BLOCK_H_DEFAULT       =  18.0   # 레고 블록 한 층 높이 실측값 (mm)
 LAYER_IDX_OFFSET      =  99.0   # 1.5 층 인덱스 보정 오프셋 — assembly 실측값 기준 (1층→0.6, 2층→1.6, 3층→2.6)
-WAIT_TIME_DEFAULT     =   0.5  # 동작 간 일반 대기 시간 (s)
+WAIT_TIME_DEFAULT     =   0.3  # 동작 간 일반 대기 시간 (s)
 GRIP_WAIT_DEFAULT     =   0.7   # 그리퍼 동작 후 안정화 대기 (s)
 INITIAL_LIFT_DEFAULT  = -20.0   # 그립 직후 초기 상승 거리 (mm, 음수=위로) # 로봇 2
 PULL_UP_DEFAULT       = -30.0   # 강제 분리 추가 상승 거리 (mm, 음수=위로) # 로봇 1
 WRIST_OFFSET_DEFAULT  =  0.0   # robot1 픽업 시 손목 추가 회전 각도 (deg)# 비전쪽에서 장축으로 넘겨줌
 BURGER_Y_MIN_DEFAULT  =   0.0   # 버거 4x2 빨강 Y필터 하한 (m) — assembly Y > DROP Y, 실측 후 조정
-CENTER_Z_DEFAULT      = -32.0   # CENTER 지점으로 이동 후 Z값 상승 (1층집는 그리퍼를 3층으로 올리는 것)
+CENTER_Z_DEFAULT      = -36.0   # CENTER 지점으로 이동 후 Z값 상승 (1층집는 그리퍼를 3층으로 올리는 것)
 # ============================================================
 
 
@@ -115,7 +115,6 @@ class BatteryDualDisassembly(Node):
 
     def set_gripper(self, cli, closed: bool) -> bool:
         res = self.call(cli, SetBool.Request(data=closed))
-        time.sleep(self.GRIP_WAIT)
         return res.success
 
     def set_gripper1(self, closed: bool) -> bool:
@@ -202,10 +201,12 @@ class BatteryDualDisassembly(Node):
         return [target]
 
     def find_target(self, target: str, retries: int = 3,
-                    y_min_m: float = None, prefer_max_y: bool = False):
+                    y_min_m: float = None, prefer_max_y: bool = False,
+                    use_fallback: bool = True):
         """타겟(+대체 타겟) 탐색. 성공 시 (pose, 실제_타겟명) 반환.
-        prefer_max_y=True 이면 모든 후보를 탐색해 Y값이 가장 큰 것을 반환."""
-        candidates = self._target_fallbacks(target)
+        prefer_max_y=True 이면 모든 후보를 탐색해 Y값이 가장 큰 것을 반환.
+        use_fallback=False 이면 2x2↔4x2 대체 탐색 없이 지정 타겟만 탐색."""
+        candidates = self._target_fallbacks(target) if use_fallback else [target]
         for _ in range(retries):
             if prefer_max_y:
                 best_p, best_candidate = None, None
@@ -299,12 +300,15 @@ class BatteryDualDisassembly(Node):
     def robot1_top_pick_with_pos_check(self, target: str, top_label: str,
                                         expected_layer: int = None,
                                         yaw_offset: float = 0.0,
-                                        z_extra_mm: float = 0.0) -> bool:
+                                        z_extra_mm: float = 0.0,
+                                        strict_normal_range: bool = False) -> bool:
         """
         robot1_top_pick과 동일하지만 그립 후 Arduino pos를 확인해 분기 처리.
-          pos 300~400 → 정상, 그대로 SEPARATION으로 진행
-          pos 500~600 → 손목 90° 회전 후 재어프로치 & 재그립
-        아이스크림 4층 초록 전용.
+          pos 300~400 → 그리퍼 열고 손목 -90° 회전 후 재그립
+          pos 500~600 → 정상, 그대로 SEPARATION으로 진행
+          범위 외      → 경고만 남기고 그대로 진행 (strict_normal_range=False, 기본)
+        strict_normal_range=True 이면 pos가 500~600이 아닌 모든 경우(300~400 포함,
+        범위 외 포함)를 비정상으로 보고 무조건 재그립한다. (큰 나무 3층 픽업 전용)
         """
         self.get_logger().info(
             f"[PICK+POS] {top_label} (layer={expected_layer}, z_extra={z_extra_mm})"
@@ -335,13 +339,16 @@ class BatteryDualDisassembly(Node):
         pos = self._last_grip_pos
         self.get_logger().info(f"[PICK+POS] Arduino pos={pos}")
 
-        if pos is not None and 300 <= pos <= 400:
-            self.get_logger().warn(f"[PICK+POS] pos={pos} → 그리퍼 열고 손목 90° 회전 후 재그립")
+        is_normal = pos is not None and 500 <= pos <= 600
+        needs_regrip = (not is_normal) if strict_normal_range else (pos is not None and 300 <= pos <= 400)
+
+        if needs_regrip:
+            self.get_logger().warn(f"[PICK+POS] pos={pos} → 그리퍼 열고 손목 -90° 회전 후 재그립")
             self.set_gripper1(False)
 
             req2 = GetTargetPose.Request()
             req2.target_size = "YAW"
-            req2.yaw = - 90.0       # 원래는 90도여서 -90도 수정한 것임 유효성 확인필요 
+            req2.yaw = - 90.0       # 원래는 90도여서 -90도 수정한 것임 유효성 확인필요
             self.call(self.cli_r1, req2)
 
             if not self.set_gripper1(True):
@@ -349,10 +356,70 @@ class BatteryDualDisassembly(Node):
                 return False
             self.get_logger().info(f"[PICK+POS] 재그립 완료 (pos={self._last_grip_pos})")
 
-        elif pos is not None and 500 <= pos <= 600:
+        elif is_normal:
             self.get_logger().info(f"[PICK+POS] pos={pos} → 정상 그립, 그대로 진행")
         else:
             self.get_logger().warn(f"[PICK+POS] pos={pos} → 범위 외, 그대로 진행")
+
+        self.send_pose(self.cli_r1, "SEPARATION")
+        return True
+
+    def robot1_top_pick_with_deep_pos_check(self, target: str, top_label: str,
+                                             expected_layer: int = None,
+                                             yaw_offset: float = 0.0,
+                                             z_extra_mm: float = 0.0,
+                                             deep_z_mm: float = 17.0) -> bool:
+        """
+        큰 나무 4층 2x2 전용 픽업.
+        정상 높이까지 하강 후 deep_z_mm(18mm) 추가 하강해 그립 → pos 확인 → 상승 복귀.
+          pos 500~600: 파지 유지 그대로 SEPARATION
+          그 외:       손목 -90° 회전 후 SEPARATION (재그립 없음)
+        """
+        self.get_logger().info(
+            f"[PICK+DEEP] {top_label} (layer={expected_layer}, deep={deep_z_mm}mm)"
+        )
+        p, _ = self.find_target(target)
+        if not p:
+            self.get_logger().error(f"[PICK+DEEP] 비전 실패: {top_label}")
+            return False
+
+        target_yaw  = self._pick_wrist_yaw(p.yaw + yaw_offset + self.WRIST_OFFSET)
+        layer_index = max(0.0, (expected_layer or 2) - self.LAYER_IDX_OFF)
+        z_move      = (p.z * 1000.0 + self.Z_OFF) - (self.BLOCK_H * layer_index) + z_extra_mm
+        z_approach  = z_move - self.Z_MARGIN
+
+        req = GetTargetPose.Request()
+        req.target_size = "APPROACH_DIS"
+        req.x   = p.x
+        req.y   = p.y
+        req.z   = z_approach
+        req.yaw = target_yaw
+        self.call(self.cli_r1, req)
+
+        self.move_z(self.cli_r1, self.Z_MARGIN + deep_z_mm)  # 감지 높이까지 한번에 하강
+
+        if not self.set_gripper1(True):
+            self.get_logger().error("[PICK+DEEP] 그리퍼 파지 실패")
+            return False
+
+        pos = self._last_grip_pos
+        self.get_logger().info(f"[PICK+DEEP] Arduino pos={pos}")
+
+        self.set_gripper1(False)                      # 감지 그립 해제
+        self.move_z(self.cli_r1, -deep_z_mm)         # 18mm 상승 복귀
+
+        if pos is not None and 500 <= pos <= 600:
+            self.get_logger().info(f"[PICK+DEEP] pos={pos} → 정상 방향, 재파지")
+        else:
+            self.get_logger().warn(f"[PICK+DEEP] pos={pos} → 손목 -90° 회전 후 재파지")
+            req_yaw = GetTargetPose.Request()
+            req_yaw.target_size = "YAW"
+            req_yaw.yaw = -90.0
+            self.call(self.cli_r1, req_yaw)
+
+        if not self.set_gripper1(True):               # 정상 높이에서 실제 파지
+            self.get_logger().error("[PICK+DEEP] 재파지 실패")
+            return False
 
         self.send_pose(self.cli_r1, "SEPARATION")
         return True
@@ -394,7 +461,6 @@ class BatteryDualDisassembly(Node):
         if not self.send_pose(self.cli_r1, "CENTER"):
             self.get_logger().error("robot1: CENTER 실패")
             return False
-        self.sleep()
         self.set_gripper1(False)
         self.call(self.cli_h1, Trigger.Request())
         self.sleep()
@@ -406,7 +472,6 @@ class BatteryDualDisassembly(Node):
         if not self.send_pose(self.cli_r1, drop_slot):
             self.get_logger().error(f"robot1: {drop_slot} 실패")
             return False
-        self.sleep()
         self.set_gripper1(False)
         self.call(self.cli_h1, Trigger.Request())
         self.sleep()
@@ -610,24 +675,18 @@ class BatteryDualDisassembly(Node):
         pos = self._last_grip_pos
         self.get_logger().info(f"[ESTOP] Arduino pos={pos}")
 
-        # ── 2단계: 그리퍼 오픈 → Z -19mm 상승 (300~400이면 YAW -90° 동시) → 2층 파지 ──
+        # ── 2단계: 그리퍼 오픈 → Z -19mm 상승 → (필요시 YAW -90°) → 2층 파지 ──
         self.set_gripper1(False)
+        self.move_z(self.cli_r1, -19.0)
 
-        if pos is not None and 300 <= pos <= 400:
-            self.get_logger().warn(f"[ESTOP] pos={pos} → YAW -90° + Z 상승 동시")
-            req_delta = GetTargetPose.Request()
-            req_delta.target_size = "APPROACH_DELTA"
-            req_delta.x   = 0.0
-            req_delta.y   = 0.0
-            req_delta.z   = -19.0
-            req_delta.yaw = -90.0
-            self.call(self.cli_r1, req_delta)
+        if pos is not None and 500 <= pos <= 600:
+            self.get_logger().info(f"[ESTOP] pos={pos} → 정상 방향, 재파지")
         else:
-            if pos is not None and 500 <= pos <= 600:
-                self.get_logger().info(f"[ESTOP] pos={pos} → 정상 그립, Z 상승")
-            else:
-                self.get_logger().warn(f"[ESTOP] pos={pos} → 범위 외, Z 상승")
-            self.move_z(self.cli_r1, -19.0)
+            self.get_logger().warn(f"[ESTOP] pos={pos} → 손목 -90° 회전 후 재파지")
+            req_yaw = GetTargetPose.Request()
+            req_yaw.target_size = "YAW"
+            req_yaw.yaw = -90.0
+            self.call(self.cli_r1, req_yaw)
 
         if not self.set_gripper1(True):
             self.get_logger().error("[ESTOP] 2층 2x2 빨강 파지 실패")
@@ -653,20 +712,34 @@ class BatteryDualDisassembly(Node):
         return True
 
     def _run_new_seq(self, name: str, top_target: str, top_label: str,
-                     mid_label: str, bot_label: str, use_pos_check: bool = False) -> bool:
+                     mid_label: str, bot_label: str, use_pos_check: bool = False,
+                     top_drop_slot: str = "DROP",
+                     pos_check_strict: bool = False,
+                     use_deep_pos_check: bool = False) -> bool:
         """
         신호등 시퀀스와 동일한 3층 분해 패턴.
-          robot1: 3층 픽업 → DROP
+          robot1: 3층 픽업 → top_drop_slot
           robot2: 2층 그립 → 대기 → DROP
           robot1: 1층 그립(DROP_AFTER_GRIP) → DROP_AFTER_DROP
         use_pos_check=True 이면 픽업 시 Arduino pos 확인 후 필요 시 YAW -90° 재그립.
+        pos_check_strict=True 이면 pos가 500~600이 아닌 모든 경우 재그립 (큰 나무 전용).
+        use_deep_pos_check=True 이면 추가 하강 후 감지 → 상승 → 재파지 (작은 나무 전용).
+        top_drop_slot: robot1이 3층 블록을 내려놓을 슬롯 (기본 DROP).
         """
         self.get_logger().info(f"{name} 분해 시작")
         self.move_both_home_pose()
         self.open_both_grippers()
 
-        if use_pos_check:
-            if not self.robot1_top_pick_with_pos_check(top_target, top_label, expected_layer=3):
+        if use_deep_pos_check:
+            if not self.robot1_top_pick_with_deep_pos_check(
+                top_target, top_label, expected_layer=3,
+            ):
+                return False
+        elif use_pos_check:
+            if not self.robot1_top_pick_with_pos_check(
+                top_target, top_label, expected_layer=3,
+                strict_normal_range=pos_check_strict,
+            ):
                 return False
         else:
             if not self.robot1_top_pick(top_target, top_label, expected_layer=3):
@@ -681,8 +754,8 @@ class BatteryDualDisassembly(Node):
         if not self.robot2_return_home_holding(mid_label):
             return False
 
-        self.get_logger().info(f"[DROP] robot1: {top_label} → DROP → DROP_AFTER_HOME")
-        if not self.send_pose(self.cli_r1, "DROP"):
+        self.get_logger().info(f"[DROP] robot1: {top_label} → {top_drop_slot} → DROP_AFTER_HOME")
+        if not self.send_pose(self.cli_r1, top_drop_slot):
             return False
         self.set_gripper1(False)
         if not self.send_pose(self.cli_r1, "DROP_AFTER_HOME"):
@@ -792,7 +865,8 @@ class BatteryDualDisassembly(Node):
         return self._run_new_seq("당근", "2x2_green", "3층 초록", "2층 노랑", "1층 노랑")
 
     def run_small_tree_once(self):
-        return self._run_new_seq("작은 나무", "2x2_green", "3층 초록", "2층 4x2 초록", "1층 노랑")
+        return self._run_new_seq("작은 나무", "2x2_green", "3층 초록", "2층 4x2 초록", "1층 노랑",
+                                 use_deep_pos_check=True)
 
     def run_traffic_light_once(self):
         return self._run_new_seq("신호등", "2x2_red", "3층 빨강", "2층 노랑", "1층 초록")
@@ -837,7 +911,6 @@ class BatteryDualDisassembly(Node):
         if not self.send_pose(self.cli_r1, "CENTER"):
             self.get_logger().error("robot1: CENTER 실패")
             return False
-        self.sleep()
         self.set_gripper1(False)                    # 4층 초록 내려놓기
 
         # Z 이동 → 손목 -90° 회전 → 3층 블록 파지 → SEPARATION2
@@ -867,7 +940,7 @@ class BatteryDualDisassembly(Node):
     def run_ice_cream_once(self):
         """
         아이스크림 4층 분해 시퀀스.
-          1단계: robot1 4층 초록 픽(pos체크) → robot2 1층 노랑 고정 → pull_up
+          1단계: robot1 4층 초록 픽(deep pos체크) → robot2 1층 노랑 고정 → pull_up
           2단계: robot2 즉시 DROP4 → HOME (return_home_holding 없음)
           3단계: robot1 CENTER 임시 배치 후 Z 이동으로 3층 초록 직접 픽 → SEPARATION
           4단계: _run_new_seq_from_separation으로 나머지 3층 연속 분해
@@ -876,8 +949,8 @@ class BatteryDualDisassembly(Node):
         self.move_both_home_pose()
         self.open_both_grippers()
 
-        # ── 1단계: 4층 2x2 초록 픽업 (pos 체크 포함) ────────────────
-        if not self.robot1_top_pick_with_pos_check(
+        # ── 1단계: 4층 2x2 초록 픽업 (deep pos 체크) ────────────────
+        if not self.robot1_top_pick_with_deep_pos_check(
             "2x2_green", "4층 2x2 초록", expected_layer=4, z_extra_mm=38.0
         ):
             return False
@@ -901,7 +974,6 @@ class BatteryDualDisassembly(Node):
         if not self.send_pose(self.cli_r1, "CENTER"):
             self.get_logger().error("robot1: CENTER 실패")
             return False
-        self.sleep()
         self.set_gripper1(False)                    # 4층 초록 내려놓기
 
         # Z 이동 → 손목 90° 회전 → 3층 블록 파지 → SEPARATION2
@@ -935,7 +1007,7 @@ class BatteryDualDisassembly(Node):
         #   robot1 픽 → robot2 세퍼레이션 그립(3층 고정) → robot1 풀업
         #   → robot2 홈(그립 유지) → robot1 DROP → robot1 홈
         #   → robot2 DROP2 → robot2 그리퍼 오픈 → robot2 홈
-        if not self.robot1_top_pick("2x2_green", "4층 2x2 초록", expected_layer=4):
+        if not self.robot1_top_pick_with_deep_pos_check("2x2_green", "4층 2x2 초록", expected_layer=4):
             return False
         if not self.robot2_side_hold("3층 4x2 초록"):
             return False
@@ -951,10 +1023,15 @@ class BatteryDualDisassembly(Node):
         self.call(self.cli_h2, Trigger.Request())
 
         # 2~4단계: 신호등과 동일한 3층 패턴 (3층→2층→1층)
+        # robot1 DROP은 1단계 DROP4(4층 2x2초록)와 물리적으로 거의 겹쳐서 DROP3으로 분리
+        # 3층 4x2 초록 픽업 시 pos가 500~600이 아닌 경우 모두 -90° 재그립
         return self._run_new_seq(
             "큰 나무 (하단 3층)",
             "4x2_green", "3층 4x2 초록",
-            "2층 4x2 초록", "1층 노랑"
+            "2층 4x2 초록", "1층 노랑",
+            use_pos_check=True,
+            pos_check_strict=True,
+            top_drop_slot="DROP3",
         )
 
         self.get_logger().info("[완료] 큰 나무")

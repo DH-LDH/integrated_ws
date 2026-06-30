@@ -6,7 +6,8 @@
       "Bash(git -C /home/orinagx/integrated_ws/src diff HEAD -- src/control_pkg/control_pkg/master_node_dis.py src/vision_pkg/vision_pkg/INUVisionLib.py)",
       "Bash(sed -i '1427d' /home/orinagx/integrated_ws/src/control_pkg/control_pkg/master_node_dis.py)",
       "Read(//etc/**)",
-      "Read(//etc/systemd/system/**)"
+      "Read(//etc/systemd/system/**)",
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\('src/control_pkg/control_pkg/master_node_dis.py'\\).read\\(\\)\\)\")"
     ],
     "additionalDirectories": [
       "/home/orinagx/integrated_ws/src/control_pkg/control_pkg"
