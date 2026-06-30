@@ -243,7 +243,7 @@ class WbCommandNode(Node):
         if assembly_res is None or not assembly_res.success:
             return False, 'ROBOT2_ASSEMBLY_JOINT_FAILED'
 
-        time.sleep(0.5)
+        time.sleep(0.2)
 
         # 조립 시작 전: 로봇1&2 HOME 정렬 완료 후 전체 블록 스캔 + birdseye 동결
         a.scan_all_blocks_at_home()
@@ -259,9 +259,8 @@ class WbCommandNode(Node):
 
         # 마무리: HOME 복귀 + 그리퍼 열기 + robot1/2 동시 END
         a.call(a.cli_h, Trigger.Request())
-        time.sleep(1.0)
+        time.sleep(0.3)
         a.call(a.cli_g, SetBool.Request(data=False))
-        time.sleep(a.WAIT_TIME)
 
         future_e1 = a.cli_r.call_async(GetTargetPose.Request(target_size="END"))
         future_e2 = a.cli_r2.call_async(GetTargetPose.Request(target_size="END"))

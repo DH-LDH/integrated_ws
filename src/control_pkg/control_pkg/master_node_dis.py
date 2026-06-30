@@ -254,7 +254,6 @@ class BatteryDualDisassembly(Node):
         self.get_logger().info("양쪽 로봇 END")
         ok1 = self.send_pose(self.cli_r1, "END")
         ok2 = self.send_pose(self.cli_r2, "END")
-        self.sleep()
         return ok1 and ok2
 
     # ── 분해 원자 동작 ───────────────────────────────────────
@@ -364,7 +363,9 @@ class BatteryDualDisassembly(Node):
         if not self.send_pose(self.cli_r2, "SEPARATION"):
             self.get_logger().error("robot2: SEPARATION 실패")
             return False
-        self.set_gripper(self.cli_g2, True)
+        if not self.set_gripper(self.cli_g2, True):
+            self.get_logger().error(f"robot2: 그리퍼 파지 실패: {bottom_label}")
+            return False
         return True
 
     def robot1_pull_up(self, top_label: str) -> bool:
@@ -417,7 +418,6 @@ class BatteryDualDisassembly(Node):
         if not self.send_pose(self.cli_r2, drop_slot):
             self.get_logger().error(f"robot2: {drop_slot} 실패")
             return False
-        self.sleep()
         self.set_gripper(self.cli_g2, False)
         self.call(self.cli_h2, Trigger.Request())
         return True
@@ -691,7 +691,6 @@ class BatteryDualDisassembly(Node):
         self.get_logger().info(f"[SEP] robot2: separation_joint 이동 ({mid_label} 그립 유지)")
         if not self.send_pose(self.cli_r2, "SEPARATION"):
             return False
-        self.sleep()
 
         self.get_logger().info(f"[GRIP] robot1: drop_after_grip_joint → {bot_label} 그립")
         if not self.send_pose(self.cli_r1, "DROP_AFTER_GRIP"):
@@ -756,7 +755,6 @@ class BatteryDualDisassembly(Node):
         self.get_logger().info(f"[SEP] robot2: separation_joint 이동 ({mid_label} 그립 유지)")
         if not self.send_pose(self.cli_r2, "SEPARATION"):
             return False
-        self.sleep()
 
         self.get_logger().info(f"[GRIP] robot1: drop_after_grip_joint → {bot_label} 그립")
         if not self.send_pose(self.cli_r1, "DROP_AFTER_GRIP"):

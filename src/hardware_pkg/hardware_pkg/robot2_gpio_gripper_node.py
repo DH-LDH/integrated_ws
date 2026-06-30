@@ -51,6 +51,8 @@ class Robot2GpioGripperNode(Node):
             "/robot2/control_gripper",
         ).value
         self.pulse_time = float(self.declare_parameter("pulse_time", 0.2).value)
+        # 펄스 후 그리퍼 기계적 동작 완료 대기 (이 값만큼 대기 후 서비스 반환)
+        self.grip_settle_time = float(self.declare_parameter("grip_settle_time", 0.5).value)
 
         self.robot = rb.Cobot(self.robot_ip)
         self.rc = rb.ResponseCollector()
@@ -96,10 +98,12 @@ class Robot2GpioGripperNode(Node):
         try:
             if request.data:
                 self.close_gripper()
-                response.message = "Robot2 GPIO close sent"
+                time.sleep(self.grip_settle_time)
+                response.message = "Robot2 GPIO close done"
             else:
                 self.open_gripper()
-                response.message = "Robot2 GPIO open sent"
+                time.sleep(self.grip_settle_time)
+                response.message = "Robot2 GPIO open done"
             response.success = True
         except Exception as e:
             self.get_logger().error(f"Robot2 GPIO gripper error: {e}")
