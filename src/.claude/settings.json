@@ -4,7 +4,9 @@
       "Bash(awk -F: '$2 > 3600 && $2 < 3815')",
       "Bash(grep -v \"^[+-]$\")",
       "Bash(git -C /home/orinagx/integrated_ws/src diff HEAD -- src/control_pkg/control_pkg/master_node_dis.py src/vision_pkg/vision_pkg/INUVisionLib.py)",
-      "Bash(sed -i '1427d' /home/orinagx/integrated_ws/src/control_pkg/control_pkg/master_node_dis.py)"
+      "Bash(sed -i '1427d' /home/orinagx/integrated_ws/src/control_pkg/control_pkg/master_node_dis.py)",
+      "Read(//etc/**)",
+      "Read(//etc/systemd/system/**)"
     ],
     "additionalDirectories": [
       "/home/orinagx/integrated_ws/src/control_pkg/control_pkg"

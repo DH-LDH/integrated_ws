@@ -56,7 +56,7 @@ INITIAL_LIFT_DEFAULT  = -20.0   # 그립 직후 초기 상승 거리 (mm, 음수
 PULL_UP_DEFAULT       = -30.0   # 강제 분리 추가 상승 거리 (mm, 음수=위로) # 로봇 1
 WRIST_OFFSET_DEFAULT  =  0.0   # robot1 픽업 시 손목 추가 회전 각도 (deg)# 비전쪽에서 장축으로 넘겨줌
 BURGER_Y_MIN_DEFAULT  =   0.0   # 버거 4x2 빨강 Y필터 하한 (m) — assembly Y > DROP Y, 실측 후 조정
-CENTER_Z_DEFAULT      = -28.0   # CENTER 지점으로 이동 후 Z값 상승 (1층집는 그리퍼를 3층으로 올리는 것)
+CENTER_Z_DEFAULT      = -32.0   # CENTER 지점으로 이동 후 Z값 상승 (1층집는 그리퍼를 3층으로 올리는 것)
 # ============================================================
 
 

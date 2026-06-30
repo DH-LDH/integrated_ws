@@ -159,7 +159,27 @@ def generate_launch_description():
             name='robot2_gpio_gripper_node',
             output='screen',
             emulate_tty=True,
-            condition=IfCondition(run_robot2_gripper_node),
+            condition=IfCondition(
+                PythonExpression([
+                    "'", run_robot2_gripper_node, "' == 'true' and '",
+                    use_xterm_for_gripper, "' != 'true'",
+                ])
+            ),
+        ),
+
+        Node(
+            package='hardware_pkg',
+            executable='robot2_gpio_gripper_node',
+            name='robot2_gpio_gripper_node',
+            output='screen',
+            emulate_tty=True,
+            prefix='xterm -hold -e',
+            condition=IfCondition(
+                PythonExpression([
+                    "'", run_robot2_gripper_node, "' == 'true' and '",
+                    use_xterm_for_gripper, "' == 'true'",
+                ])
+            ),
         ),
 
         # =========================

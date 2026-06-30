@@ -315,6 +315,8 @@ class WbCommandNode(Node):
         print("  home2 / h2           : robot2 HOME")
         print("  end2 / e2            : robot2 END")
         print("  assembly_joint / aj  : robot2 ASSEMBLY_JOINT")
+        print("  separation / sep     : robot1 SEPARATION (분리 조인트)")
+        print("  separation2 / sep2   : robot2 SEPARATION (분리 조인트)")
         print("  home_all / ha        : both HOME")
         print("  end_all / ea         : both END")
         print("  quit / q             : shutdown command node")
@@ -356,6 +358,18 @@ class WbCommandNode(Node):
                     elif cmd_lower in ("assembly_joint", "assembly", "aj"):
                         self.get_logger().info("[KEYBOARD] robot2 ASSEMBLY_JOINT")
                         self.assembler.move_robot2_assembly_joint()
+                    elif cmd_lower in ("separation", "sep", "s1"):
+                        self.get_logger().info("[KEYBOARD] robot1 SEPARATION")
+                        self.assembler.call(
+                            self.assembler.cli_r,
+                            GetTargetPose.Request(target_size="SEPARATION"),
+                        )
+                    elif cmd_lower in ("separation2", "sep2", "s2"):
+                        self.get_logger().info("[KEYBOARD] robot2 SEPARATION")
+                        self.assembler.call(
+                            self.assembler.cli_r2,
+                            GetTargetPose.Request(target_size="SEPARATION"),
+                        )
                     elif cmd_lower in ("home_all", "homeall", "ha"):
                         self.get_logger().info("[KEYBOARD] both HOME")
                         self.disassembler.move_both_home_pose()
@@ -367,7 +381,7 @@ class WbCommandNode(Node):
                         rclpy.shutdown()
                         return
                     else:
-                        print("Use: home/end/home2/end2/aj/ha/ea  또는  quit")
+                        print("Use: home/end/home2/end2/aj/sep/sep2/ha/ea  또는  quit")
             except Exception as e:
                 self.get_logger().error(f"[KEYBOARD] command failed: {e}")
 
