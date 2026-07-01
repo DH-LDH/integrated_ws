@@ -41,7 +41,7 @@ import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
 from std_srvs.srv import Trigger
-from srvs_pkg.srv import GetTargetPose
+from robocup_pkg.srv import GetTargetPose
 from vision_pkg import INUVisionCall as ivc
 from ultralytics import YOLO as _YOLO
 

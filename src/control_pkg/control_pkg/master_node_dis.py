@@ -40,7 +40,7 @@ Revision History
 import time
 import rclpy
 from rclpy.node import Node
-from srvs_pkg.srv import GetTargetPose
+from robocup_pkg.srv import GetTargetPose
 from std_srvs.srv import SetBool, Trigger
 
 # ============================================================
@@ -275,6 +275,7 @@ class BatteryDualDisassembly(Node):
         p, _ = self.find_target(target, y_min_m=y_min_m, prefer_max_y=prefer_max_y)
         if not p:
             self.get_logger().error(f"[PICK] 비전 실패: {top_label}")
+            self.move_both_end_pose()
             return False
 
         target_yaw  = self._pick_wrist_yaw(p.yaw + yaw_offset + self.WRIST_OFFSET)
@@ -316,6 +317,7 @@ class BatteryDualDisassembly(Node):
         p, _ = self.find_target(target)
         if not p:
             self.get_logger().error(f"[PICK+POS] 비전 실패: {top_label}")
+            self.move_both_end_pose()
             return False
 
         target_yaw  = self._pick_wrist_yaw(p.yaw + yaw_offset + self.WRIST_OFFSET)
@@ -381,6 +383,7 @@ class BatteryDualDisassembly(Node):
         p, _ = self.find_target(target)
         if not p:
             self.get_logger().error(f"[PICK+DEEP] 비전 실패: {top_label}")
+            self.move_both_end_pose()
             return False
 
         target_yaw  = self._pick_wrist_yaw(p.yaw + yaw_offset + self.WRIST_OFFSET)
@@ -653,6 +656,7 @@ class BatteryDualDisassembly(Node):
         p, _ = self.find_target("2x2_red")
         if not p:
             self.get_logger().error("[ESTOP] 비전 실패: 2층 2x2 빨강")
+            self.move_both_end_pose()
             return False
 
         target_yaw = self._pick_wrist_yaw(p.yaw + self.WRIST_OFFSET)

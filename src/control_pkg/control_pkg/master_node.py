@@ -40,7 +40,7 @@ Revision History
 # import rclpy
 # from rclpy.node import Node
 
-# from srvs_pkg.srv import GetTargetPose
+# from robocup_pkg.srv import GetTargetPose
 # from std_srvs.srv import SetBool, Trigger
 # from std_msgs.msg import Int32, String
 
@@ -2423,7 +2423,7 @@ import json
 import rclpy
 from rclpy.node import Node
 
-from srvs_pkg.srv import GetTargetPose
+from robocup_pkg.srv import GetTargetPose
 from std_srvs.srv import SetBool, Trigger
 from std_msgs.msg import Int32, String
 
@@ -5050,7 +5050,7 @@ if __name__ == "__main__":
 # import rclpy
 # from rclpy.node import Node
 
-# from srvs_pkg.srv import GetTargetPose
+# from robocup_pkg.srv import GetTargetPose
 # from std_srvs.srv import SetBool, Trigger
 
 # import time

@@ -45,8 +45,8 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 
 from std_srvs.srv import Trigger, SetBool
-from sml_msgs.action import WbTask
-from srvs_pkg.srv import GetTargetPose
+from robocup_pkg.action import WbTask
+from robocup_pkg.srv import GetTargetPose
 
 # ──────────────────────────────────────────────────────────
 # 통합 ws 패키지: control_pkg

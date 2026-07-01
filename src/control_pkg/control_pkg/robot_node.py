@@ -39,7 +39,7 @@ Revision History
 
 import rclpy
 from rclpy.node import Node
-from srvs_pkg.srv import GetTargetPose
+from robocup_pkg.srv import GetTargetPose
 from std_srvs.srv import Trigger
 import rbpodo as rb
 import numpy as np

@@ -1,0 +1,14 @@
+string target_color
+string target_size
+float64 x
+float64 y
+float64 z
+float64 yaw
+---
+bool success
+float64 x
+float64 y
+float64 z
+float64 yaw
+string class_name
+int32 layer

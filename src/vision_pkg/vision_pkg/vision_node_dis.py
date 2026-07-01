@@ -34,7 +34,7 @@ Revision History
 
 import rclpy
 from rclpy.node import Node
-from srvs_pkg.srv import GetTargetPose
+from robocup_pkg.srv import GetTargetPose
 from vision_pkg.vision_6d_manager import (
     COMP_MODEL_PATH,
     DET_MODEL_PATH,

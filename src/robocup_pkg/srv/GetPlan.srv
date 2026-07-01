@@ -1,0 +1,4 @@
+---
+robocup_pkg/Step[] steps
+bool success
+string message

@@ -39,7 +39,7 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from std_msgs.msg import String
-from srvs_pkg.srv import GetTargetPose
+from robocup_pkg.srv import GetTargetPose
 
 UPSTREAM_SRV = "/get_target_pose"
 MY_SRV       = "/get_target_pose_mapped"
