@@ -57,6 +57,9 @@ PULL_UP_DEFAULT       = -30.0   # 강제 분리 추가 상승 거리 (mm, 음수
 WRIST_OFFSET_DEFAULT  =  0.0   # robot1 픽업 시 손목 추가 회전 각도 (deg)# 비전쪽에서 장축으로 넘겨줌
 BURGER_Y_MIN_DEFAULT  =   0.0   # 버거 4x2 빨강 Y필터 하한 (m) — assembly Y > DROP Y, 실측 후 조정
 CENTER_Z_DEFAULT      = -36.0   # CENTER 지점으로 이동 후 Z값 상승 (1층집는 그리퍼를 3층으로 올리는 것)
+HOME_X_SEARCH_ENABLE_DEFAULT = True
+HOME_X_SEARCH_STEP_M_DEFAULT = 0.250
+HOME_X_SEARCH_Z_MM_DEFAULT   = 60.0
 # ============================================================
 
 
@@ -89,6 +92,24 @@ class BatteryDualDisassembly(Node):
         self.WRIST_OFFSET   = float(self.declare_parameter("wrist_offset_deg",       WRIST_OFFSET_DEFAULT).value)
         self.BURGER_Y_MIN   = float(self.declare_parameter("burger_y_min_m",         BURGER_Y_MIN_DEFAULT).value)
         self.CENTER_Z       = float(self.declare_parameter("center_z_mm",            CENTER_Z_DEFAULT).value)
+        self.HOME_X_SEARCH_ENABLE = bool(
+            self.declare_parameter(
+                "home_x_search_enable",
+                HOME_X_SEARCH_ENABLE_DEFAULT,
+            ).value
+        )
+        self.HOME_X_SEARCH_STEP_M = float(
+            self.declare_parameter(
+                "home_x_search_step_m",
+                HOME_X_SEARCH_STEP_M_DEFAULT,
+            ).value
+        )
+        self.HOME_X_SEARCH_Z_MM = float(
+            self.declare_parameter(
+                "home_x_search_z_mm",
+                HOME_X_SEARCH_Z_MM_DEFAULT,
+            ).value
+        )
 
         # 비전 클래스명 → 타겟 ID 매핑
         self.class_to_target_id = {
@@ -99,7 +120,12 @@ class BatteryDualDisassembly(Node):
             "big carrot": "4482", "burger": "8518", "bigtree": "46262", "icecream": "48132",
         }
 
-        self.get_logger().info(f"Disassembly node ready. g1={r1_grip_srv}, g2={r2_grip_srv}")
+        self.get_logger().info(
+            f"Disassembly node ready. g1={r1_grip_srv}, g2={r2_grip_srv}, "
+            f"home_x_search_enable={self.HOME_X_SEARCH_ENABLE}, "
+            f"home_x_search_step_m={self.HOME_X_SEARCH_STEP_M:.4f}, "
+            f"home_x_search_z_mm={self.HOME_X_SEARCH_Z_MM:.1f}"
+        )
 
     # ── 저수준 헬퍼 ──────────────────────────────────────────
 
@@ -146,6 +172,40 @@ class BatteryDualDisassembly(Node):
         req = GetTargetPose.Request()
         req.target_size = pose_name
         return self.call(cli, req).success
+
+    def move_robot1_home_x_search(self) -> bool:
+        """
+        robot1을 HOME 기준 Base x축 -방향 탐색 위치로 이동한다.
+        robot_node.py의 HOME_X_SEARCH는 ReferenceFrame.Base로 실행된다.
+        """
+        x_offset = -abs(self.HOME_X_SEARCH_STEP_M)
+        self.get_logger().info(
+            f"[HOME X SEARCH][DIS] robot1 HOME 복귀 후 "
+            f"z={self.HOME_X_SEARCH_Z_MM:.1f}mm 하강, "
+            f"Base x={x_offset * 1000.0:.1f}mm 이동"
+        )
+
+        home_res = self.call(self.cli_h1, Trigger.Request())
+        if home_res is None or not home_res.success:
+            self.get_logger().error("[HOME X SEARCH][DIS] robot1 HOME 이동 실패")
+            return False
+        self.sleep()
+
+        if not self.move_z(self.cli_r1, self.HOME_X_SEARCH_Z_MM):
+            self.get_logger().error("[HOME X SEARCH][DIS] robot1 Z 하강 실패")
+            return False
+        self.sleep()
+
+        req = GetTargetPose.Request()
+        req.target_size = "HOME_X_SEARCH"
+        req.x = x_offset
+        res = self.call(self.cli_r1, req)
+        if res is None or not res.success:
+            self.get_logger().error("[HOME X SEARCH][DIS] robot1 Base x 이동 실패")
+            return False
+
+        self.sleep()
+        return True
 
     # ── 비전 ─────────────────────────────────────────────────
 
@@ -207,33 +267,71 @@ class BatteryDualDisassembly(Node):
         prefer_max_y=True 이면 모든 후보를 탐색해 Y값이 가장 큰 것을 반환.
         use_fallback=False 이면 2x2↔4x2 대체 탐색 없이 지정 타겟만 탐색."""
         candidates = self._target_fallbacks(target) if use_fallback else [target]
-        for _ in range(retries):
+
+        def choose_from_candidates(label: str):
             if prefer_max_y:
                 best_p, best_candidate = None, None
                 for candidate in candidates:
                     p = self.request_vision_pose(candidate)
+                    if p and y_min_m is not None and p.y < y_min_m:
+                        self.get_logger().warn(
+                            f"[Y필터] {candidate} y={p.y*1000:.1f}mm < {y_min_m*1000:.1f}mm → 스킵"
+                        )
+                        continue
                     if p and (best_p is None or p.y > best_p.y):
                         best_p, best_candidate = p, candidate
-                if best_p is not None:
-                    if best_candidate != target:
+                if best_p is not None and best_candidate != target:
+                    self.get_logger().warn(
+                        f"{target} → 대체 {best_candidate}로 진행 "
+                        f"({label}, Y최대 선택: {best_p.y*1000:.1f}mm)"
+                    )
+                return best_p, best_candidate
+
+            for candidate in candidates:
+                p = self.request_vision_pose(candidate)
+                if p:
+                    if y_min_m is not None and p.y < y_min_m:
                         self.get_logger().warn(
-                            f"{target} → 대체 {best_candidate}로 진행 (Y최대 선택: {best_p.y*1000:.1f}mm)"
+                            f"[Y필터] {candidate} y={p.y*1000:.1f}mm < {y_min_m*1000:.1f}mm → 스킵"
                         )
-                    return best_p, best_candidate
-            else:
-                for candidate in candidates:
-                    p = self.request_vision_pose(candidate)
-                    if p:
-                        if y_min_m is not None and p.y < y_min_m:
-                            self.get_logger().warn(
-                                f"[Y필터] {candidate} y={p.y*1000:.1f}mm < {y_min_m*1000:.1f}mm → 스킵"
-                            )
-                            time.sleep(0.3)
-                            continue
-                        if candidate != target:
-                            self.get_logger().warn(f"{target} → 대체 {candidate}로 진행")
-                        return p, candidate
-                    time.sleep(0.3)
+                        time.sleep(0.3)
+                        continue
+                    if candidate != target:
+                        self.get_logger().warn(f"{target} → 대체 {candidate}로 진행 ({label})")
+                    return p, candidate
+                time.sleep(0.3)
+
+            return None, None
+
+        for _ in range(retries):
+            p, candidate = choose_from_candidates("현재 시야")
+            if p is not None:
+                return p, candidate
+
+        if not self.HOME_X_SEARCH_ENABLE:
+            return None, None
+
+        self.get_logger().warn(
+            f"[HOME X SEARCH][DIS] {target} 현재 시야 인식 실패. "
+            f"HOME 기준 x축 -{abs(self.HOME_X_SEARCH_STEP_M) * 1000.0:.0f}mm 위치에서 재인식합니다."
+        )
+        if not self.move_robot1_home_x_search():
+            return None, None
+
+        for _ in range(retries):
+            p, candidate = choose_from_candidates("HOME_X_SEARCH")
+            if p is not None:
+                self.get_logger().info(
+                    f"[HOME X SEARCH][DIS] {target} 재인식 성공: "
+                    f"x={p.x*1000:.1f}mm, y={p.y*1000:.1f}mm, z={p.z*1000:.1f}mm"
+                )
+                return p, candidate
+
+        self.get_logger().warn(
+            f"[HOME X SEARCH][DIS] {target} x축 -방향 재인식 실패. robot1 HOME으로 복귀합니다."
+        )
+        self.call(self.cli_h1, Trigger.Request())
+        self.sleep()
         return None, None
 
     # ── Yaw 정규화 ───────────────────────────────────────────

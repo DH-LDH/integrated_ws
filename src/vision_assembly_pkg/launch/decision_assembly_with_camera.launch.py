@@ -101,7 +101,7 @@ def generate_launch_description():
                 default_value="/camera/camera/aligned_depth_to_color/image_raw",
             ),
             DeclareLaunchArgument("method", default_value="cv"),
-            DeclareLaunchArgument("depth_combine_mode", default_value="filter"),
+            DeclareLaunchArgument("depth_combine_mode", default_value="depth"),
             decision_assembly,
         ]
     )

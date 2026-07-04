@@ -35,6 +35,9 @@ Revision History
 ===============================================================================
 """
 
+import os
+import signal
+import subprocess
 import time
 import threading
 
@@ -103,12 +106,37 @@ RECYCLE_FUNC = {
 }
 
 
+def _as_bool(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ('1', 'true', 'yes', 'on')
+    return bool(value)
+
+
 class WbCommandNode(Node):
 
     def __init__(self):
         super().__init__('wb_command_node')
         self.cbg = ReentrantCallbackGroup()
         self.command_lock = threading.RLock()
+        self.auto_manage_vision = _as_bool(
+            self.declare_parameter('auto_manage_vision', True).value)
+        self.vision_start_timeout = float(
+            self.declare_parameter('vision_start_timeout_sec', 45.0).value)
+        self.vision_stop_timeout = float(
+            self.declare_parameter('vision_stop_timeout_sec', 8.0).value)
+        self.vision_dis_camera_serial = str(
+            self.declare_parameter('vision_dis_camera_serial', '332322072441').value)
+        self.auto_manage_assembly_vision = _as_bool(
+            self.declare_parameter('auto_manage_assembly_vision', True).value)
+        self.assembly_vision_start_timeout = float(
+            self.declare_parameter('assembly_vision_start_timeout_sec', 20.0).value)
+        self.enable_keyboard = _as_bool(
+            self.declare_parameter('enable_keyboard', True).value)
+        self._vision_proc = None
+        self._vision_mode = None
+        self._assembly_vision_procs = []
 
         # 조립/분해 마스터 인스턴스 생성
         # (둘 다 __init__에서 클라이언트만 만들고 HW에는 직접 연결하지 않음)
@@ -127,13 +155,239 @@ class WbCommandNode(Node):
             execute_callback=self._execute_cb,
             callback_group=self.cbg,
         )
-        self.get_logger().info('[CMD] wb_task 분배 노드 시작')
+        self.get_logger().info(
+            f'[CMD] wb_task 분배 노드 시작 '
+            f'(auto_manage_vision={self.auto_manage_vision})')
 
-        self.keyboard_thread = threading.Thread(
-            target=self.keyboard_loop,
-            daemon=True,
-        )
-        self.keyboard_thread.start()
+        self.keyboard_thread = None
+        if self.enable_keyboard:
+            self.keyboard_thread = threading.Thread(
+                target=self.keyboard_loop,
+                daemon=True,
+            )
+            self.keyboard_thread.start()
+
+    # ──────────────────────────────────────────────────────
+    # Robot1 vision process switching
+    # ──────────────────────────────────────────────────────
+    def _vision_service_for_mode(self, mode):
+        if mode == 'assembly':
+            return self.assembler.cli_v
+        if mode == 'disassembly':
+            return self.disassembler.cli_v_dis
+        raise ValueError(f'unknown vision mode: {mode}')
+
+    def _vision_command_for_mode(self, mode):
+        if mode == 'assembly':
+            return ['ros2', 'run', 'vision_pkg', 'vision_node']
+        if mode == 'disassembly':
+            return [
+                'ros2', 'run', 'vision_pkg', 'vision_node_dis',
+                '--ros-args',
+                '-p', f'camera_serial:={self.vision_dis_camera_serial}',
+            ]
+        raise ValueError(f'unknown vision mode: {mode}')
+
+    def _managed_vision_alive(self):
+        return self._vision_proc is not None and self._vision_proc.poll() is None
+
+    @staticmethod
+    def _proc_alive(proc):
+        return proc is not None and proc.poll() is None
+
+    def _wait_for_service_ready(self, cli, timeout_sec, label):
+        deadline = time.monotonic() + timeout_sec
+        while rclpy.ok() and time.monotonic() < deadline:
+            if cli.wait_for_service(timeout_sec=0.5):
+                self.get_logger().info(f'[VISION_SWITCH] {label} 서비스 준비 완료')
+                return True
+        self.get_logger().error(f'[VISION_SWITCH] {label} 서비스 준비 시간 초과')
+        return False
+
+    def _stop_managed_vision(self):
+        if self._vision_proc is None:
+            self._vision_mode = None
+            return True
+
+        proc = self._vision_proc
+        mode = self._vision_mode
+        if proc.poll() is not None:
+            self.get_logger().info(
+                f'[VISION_SWITCH] 이전 {mode} vision process 이미 종료됨 '
+                f'(rc={proc.returncode})')
+            self._vision_proc = None
+            self._vision_mode = None
+            return True
+
+        self.get_logger().info(f'[VISION_SWITCH] 이전 {mode} vision 종료 요청')
+        try:
+            os.killpg(proc.pid, signal.SIGINT)
+        except ProcessLookupError:
+            self._vision_proc = None
+            self._vision_mode = None
+            return True
+
+        try:
+            proc.wait(timeout=self.vision_stop_timeout)
+        except subprocess.TimeoutExpired:
+            self.get_logger().warn(
+                f'[VISION_SWITCH] {mode} vision SIGINT 종료 지연, terminate 전송')
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+                proc.wait(timeout=3.0)
+            except Exception:
+                self.get_logger().error(
+                    f'[VISION_SWITCH] {mode} vision 종료 실패, kill 전송')
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                    proc.wait(timeout=1.0)
+                except Exception as exc:
+                    self.get_logger().error(
+                        f'[VISION_SWITCH] {mode} vision kill 실패: {exc}')
+                    return False
+
+        self.get_logger().info(f'[VISION_SWITCH] {mode} vision 종료 완료')
+        self._vision_proc = None
+        self._vision_mode = None
+        time.sleep(1.0)
+        return True
+
+    def _start_background_proc(self, label, cmd):
+        self.get_logger().info(f'[VISION_SWITCH] {label} 시작: ' + ' '.join(cmd))
+        try:
+            return subprocess.Popen(cmd, start_new_session=True)
+        except Exception as exc:
+            self.get_logger().error(f'[VISION_SWITCH] {label} 시작 실패: {exc}')
+            return None
+
+    def _stop_proc(self, label, proc, timeout_sec=5.0):
+        if proc is None or proc.poll() is not None:
+            return True
+        self.get_logger().info(f'[VISION_SWITCH] {label} 종료 요청')
+        try:
+            os.killpg(proc.pid, signal.SIGINT)
+        except ProcessLookupError:
+            return True
+        try:
+            proc.wait(timeout=timeout_sec)
+            return True
+        except subprocess.TimeoutExpired:
+            self.get_logger().warn(f'[VISION_SWITCH] {label} SIGTERM 전송')
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+                proc.wait(timeout=3.0)
+                return True
+            except Exception:
+                self.get_logger().error(f'[VISION_SWITCH] {label} SIGKILL 전송')
+                try:
+                    os.killpg(proc.pid, signal.SIGKILL)
+                    proc.wait(timeout=1.0)
+                    return True
+                except Exception as exc:
+                    self.get_logger().error(f'[VISION_SWITCH] {label} 종료 실패: {exc}')
+                    return False
+
+    def _assembly_support_alive(self):
+        return any(self._proc_alive(proc) for _, proc in self._assembly_vision_procs)
+
+    def _stop_assembly_support(self):
+        ok = True
+        for label, proc in reversed(self._assembly_vision_procs):
+            if not self._stop_proc(label, proc, timeout_sec=5.0):
+                ok = False
+        self._assembly_vision_procs = []
+        return ok
+
+    def _ensure_assembly_support(self):
+        if not self.auto_manage_assembly_vision:
+            return True
+
+        a = self.assembler
+        if a.cli_lock_positions.wait_for_service(timeout_sec=0.5):
+            count = a.wait_decision_block_count(timeout_sec=1.0)
+            if count is not None:
+                self.get_logger().info('[VISION_SWITCH] 기존 조립 birdseye/decision 사용')
+                return True
+
+        if not self._assembly_support_alive():
+            self._assembly_vision_procs = []
+            proc = self._start_background_proc(
+                'decision_assembly_with_camera',
+                ['ros2', 'launch', 'vision_assembly_pkg',
+                 'decision_assembly_with_camera.launch.py'],
+            )
+            if proc is not None:
+                self._assembly_vision_procs.append(('decision_assembly_with_camera', proc))
+            time.sleep(2.0)
+
+            proc = self._start_background_proc(
+                'birdseye_assembly',
+                ['ros2', 'run', 'vision_assembly_pkg', 'birdseye_assembly'],
+            )
+            if proc is not None:
+                self._assembly_vision_procs.append(('birdseye_assembly', proc))
+
+            proc = self._start_background_proc(
+                'khj_point_node',
+                ['ros2', 'run', 'control_pkg', 'khj_point_node'],
+            )
+            if proc is not None:
+                self._assembly_vision_procs.append(('khj_point_node', proc))
+
+        deadline = time.monotonic() + self.assembly_vision_start_timeout
+        while rclpy.ok() and time.monotonic() < deadline:
+            lock_ready = a.cli_lock_positions.wait_for_service(timeout_sec=0.5)
+            count_ready = a.wait_decision_block_count(timeout_sec=0.5) is not None
+            if lock_ready and count_ready:
+                self.get_logger().info('[VISION_SWITCH] 조립 birdseye/decision 준비 완료')
+                return True
+
+        self.get_logger().error('[VISION_SWITCH] 조립 birdseye/decision 준비 시간 초과')
+        return False
+
+    def _ensure_robot1_vision(self, mode):
+        if not self.auto_manage_vision:
+            self.get_logger().info(
+                f'[VISION_SWITCH] auto_manage_vision=false, {mode} 비전 자동 전환 생략')
+            return True
+
+        if mode == 'disassembly':
+            self._stop_assembly_support()
+
+        cli = self._vision_service_for_mode(mode)
+        if self._managed_vision_alive() and self._vision_mode == mode:
+            return self._wait_for_service_ready(
+                cli, self.vision_start_timeout, mode)
+
+        if self._managed_vision_alive() and self._vision_mode != mode:
+            if not self._stop_managed_vision():
+                return False
+
+        if cli.wait_for_service(timeout_sec=0.5):
+            self.get_logger().info(
+                f'[VISION_SWITCH] 기존 {mode} 비전 서비스 사용: {cli.srv_name}')
+            self._vision_mode = mode
+            return True
+
+        cmd = self._vision_command_for_mode(mode)
+        self.get_logger().info('[VISION_SWITCH] robot1 비전 시작: ' + ' '.join(cmd))
+        try:
+            self._vision_proc = subprocess.Popen(
+                cmd,
+                start_new_session=True,
+            )
+        except Exception as exc:
+            self.get_logger().error(f'[VISION_SWITCH] 비전 시작 실패: {exc}')
+            self._vision_proc = None
+            self._vision_mode = None
+            return False
+
+        self._vision_mode = mode
+        return self._wait_for_service_ready(cli, self.vision_start_timeout, mode)
+
+    def shutdown_managed_vision(self):
+        self._stop_managed_vision()
+        self._stop_assembly_support()
 
     # ──────────────────────────────────────────────────────
     @staticmethod
@@ -206,6 +460,10 @@ class WbCommandNode(Node):
         func_name = PRODUCE_FUNC.get(product_id)
         if func_name is None:
             return False, f'NO_ASSEMBLY_FUNC:{product_id}'
+        if not self._ensure_assembly_support():
+            return False, 'ASSEMBLY_BIRDSEYE_NOT_READY'
+        if not self._ensure_robot1_vision('assembly'):
+            return False, 'ASSEMBLY_VISION_NOT_READY'
 
         fb = WbTask.Feedback()
         fb.status = 'PRODUCING'
@@ -284,6 +542,8 @@ class WbCommandNode(Node):
         func_name = RECYCLE_FUNC.get(product_id)
         if func_name is None:
             return False, f'NO_DISASSEMBLY_FUNC:{product_id}'
+        if not self._ensure_robot1_vision('disassembly'):
+            return False, 'DISASSEMBLY_VISION_NOT_READY'
 
         fb = WbTask.Feedback()
         fb.status = 'RECYCLING'
@@ -401,6 +661,7 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
+        cmd.shutdown_managed_vision()
         cmd.assembler.destroy_node()
         cmd.disassembler.destroy_node()
         cmd.destroy_node()

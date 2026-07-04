@@ -29,6 +29,7 @@ setup(
             'master_node_dis = control_pkg.master_node_dis:main',
             'command_node = control_pkg.command_node:main',
             'khj_point_node = control_pkg.khj_point_node:main',
+            'manual_order_node = control_pkg.manual_order_node:main',
         ],
     },
 )

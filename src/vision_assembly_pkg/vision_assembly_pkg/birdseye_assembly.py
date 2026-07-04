@@ -57,12 +57,12 @@ BIRD_W = 500
 BIRD_H = 600
 
 # image_raw 상의 중앙점 (probe) 픽셀 (카메라 180° 재설치 후 실측)
-PROBE_PIXEL = (125, 255)
+PROBE_PIXEL = (115, 210)
 
 # ── 실제 거리 스케일 ─────────────────────────────────────────────
 # 좌상→우상: 38 cm  /  좌상→좌하: 65.5 cm
-ROI_REAL_W_CM = 38.0
-ROI_REAL_H_CM = 73.5
+ROI_REAL_W_CM = 39.5
+ROI_REAL_H_CM = 71.0
 CM_PER_PX_X   = ROI_REAL_W_CM / BIRD_W   # 0.076  cm/px
 CM_PER_PX_Y   = ROI_REAL_H_CM / BIRD_H   # 0.1233 cm/px
 

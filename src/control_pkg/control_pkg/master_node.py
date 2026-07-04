@@ -2443,7 +2443,7 @@ PRE_XY_LOWER_DEFAULT = 60.0   # 정밀 재촬영을 위한 중간 Z 높이 (mm)
 PRECISION_SCAN_SETTLE_SEC_DEFAULT = 0.5  # 재촬영 위치 이동 후 비전 요청 전 안정화 대기 시간 (s)
 WRIST_OFFSET_DEFAULT =   0.0   # 손목 추가 회전 각도 (deg)
 HOME_X_SEARCH_ENABLE_DEFAULT = True
-HOME_X_SEARCH_STEP_M_DEFAULT = 0.150
+HOME_X_SEARCH_STEP_M_DEFAULT = 0.020
 
 # 정밀 재촬영 시, 대상 블록 중심에서 global y축 방향으로 이동할 거리.
 # 현재 기본값 +0.100m = global y축 +100mm 방향
@@ -3091,7 +3091,7 @@ class MasterNode(Node):
     ):
         """
         먼저 현재 시야에서 1회 인식한다.
-        실패하면 HOME 기준 x축 -/+ 방향으로 이동하며 추가 인식한다.
+        실패하면 HOME 기준 x축 -방향으로 이동하며 추가 인식한다.
         """
         p = self.request_target_pose(color, local_id=local_id)
 
@@ -3109,10 +3109,10 @@ class MasterNode(Node):
 
         self.get_logger().warn(
             f"[{color}] 현재 시야에서 인식 실패. "
-            f"HOME 기준 x축 +/-{self.HOME_X_SEARCH_STEP_M * 1000.0:.0f}mm 탐색을 시작합니다."
+            f"HOME 기준 x축 -{self.HOME_X_SEARCH_STEP_M * 1000.0:.0f}mm 위치에서 재인식합니다."
         )
 
-        for x_offset in (-self.HOME_X_SEARCH_STEP_M, self.HOME_X_SEARCH_STEP_M):
+        for x_offset in (-abs(self.HOME_X_SEARCH_STEP_M),):
             self.get_logger().info(
                 f"[HOME X SEARCH] HOME 복귀 후 z={self.PRE_XY_LOWER:.1f}mm 낮춘 뒤 "
                 f"x_offset={x_offset:.4f}m 위치에서 {color} 탐색"
@@ -3154,7 +3154,7 @@ class MasterNode(Node):
                 return p
 
         self.get_logger().warn(
-            f"[HOME X SEARCH] {color} 좌우 탐색 실패. HOME으로 복귀합니다."
+            f"[HOME X SEARCH] {color} x축 -방향 재인식 실패. HOME으로 복귀합니다."
         )
         self.call(self.cli_h, Trigger.Request())
         time.sleep(self.WAIT_TIME)

@@ -71,13 +71,13 @@ def generate_launch_description():
 
         DeclareLaunchArgument(
             'run_robot_node',
-            default_value='true',
+            default_value='false',
             description='Run control_pkg robot_node'
         ),
 
         DeclareLaunchArgument(
             'run_command_node',
-            default_value='true',
+            default_value='false',
             description='Run control_pkg command_node'
         ),
 
@@ -95,13 +95,13 @@ def generate_launch_description():
 
         DeclareLaunchArgument(
             'run_gripper_node',
-            default_value='true',
+            default_value='false',
             description='Run hardware_pkg gripper_node'
         ),
 
         DeclareLaunchArgument(
             'run_robot2_gripper_node',
-            default_value='true',
+            default_value='false',
             description='Run hardware_pkg robot2_gpio_gripper_node'
         ),
 

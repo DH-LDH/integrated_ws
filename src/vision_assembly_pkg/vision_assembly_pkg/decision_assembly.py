@@ -71,10 +71,10 @@ DEBUG_SUMMARY_TOPIC = "/decision_assembly/summary"
 DEBUG_ROI_POLYGON = [v for pt in _SHARED_ROI_POLYGON for v in pt]
 
 # CV blob 필터
-DEBUG_CV_MIN_AREA = 600.0
+DEBUG_CV_MIN_AREA = 650.0
 
 # 위치별 블럭 1개 기준 면적 대비 이 비율보다 작으면 잡음으로 본다.
-DEBUG_CV_MIN_AREA_RATIO = 0.25
+DEBUG_CV_MIN_AREA_RATIO = 0.18
 
 # 0이면 고정 최대값 제한 비활성화
 # 이 값은 "절대 이 이상은 무조건 버림" 용도
@@ -95,8 +95,8 @@ DEBUG_CV_MAX_ESTIMATED_COUNT = 4
 DEBUG_CV_MULTI_COUNT_RATIO = 1.45
 
 # HSV / edge / morphology
-DEBUG_CV_SAT_MIN = 50
-DEBUG_CV_USE_EDGE = True
+DEBUG_CV_SAT_MIN = 45
+DEBUG_CV_USE_EDGE = False
 DEBUG_CV_EDGE_LOW = 45
 DEBUG_CV_EDGE_HIGH = 135
 DEBUG_CV_MORPH_KERNEL = 3
@@ -121,14 +121,14 @@ DEBUG_DEPTH_RESIZE_IF_NEEDED = True
 # and   : colored blob이면서 바닥보다 튀어나온 것만 검출. 강하지만 먼 물체를 놓칠 수 있음.
 # depth : depth만으로 검출.
 # or    : RGB 또는 depth 중 하나라도 잡히면 검출. 민감하지만 오검출 가능.
-DEBUG_DEPTH_COMBINE_MODE = "filter"
+DEBUG_DEPTH_COMBINE_MODE = "depth"
 DEBUG_DEPTH_FILTER_MIN_VALID_RATIO = 0.20
 DEBUG_DEPTH_FILTER_MIN_OBJECT_RATIO = 0.08
 
 # ROI 경계 내부 여백 (픽셀)
 # 검출 영역을 ROI 경계에서 이 픽셀만큼 안쪽으로 축소한다.
 # Canny 가 ROI 폴리곤 경계를 엣지로 잡는 아티팩트를 차단한다.
-DEBUG_ROI_INNER_MARGIN = 8
+DEBUG_ROI_INNER_MARGIN = 16
 
 # 붙은 blob 분리
 DEBUG_CV_WATERSHED = True
@@ -137,7 +137,7 @@ DEBUG_CV_WATERSHED_MAX_PARTS = 4
 DEBUG_CV_SPLIT_MIN_AREA_RATIO = 0.70
 
 # YOLO 기본값
-DEBUG_YOLO_CONF = 0.5
+DEBUG_YOLO_CONF = 0.35
 DEBUG_YOLO_IOU = 0.45
 DEBUG_YOLO_DEVICE = "0"
 
@@ -634,8 +634,8 @@ def detection_quality(det):
     area = float(det.get("count_area", det.get("area", 0.0)))
     single_area = max(1.0, float(det.get("single_area", 1.0)))
     return (
-        float(area / single_area),
         float(det.get("area", 0.0)),
+        float(area / single_area),
     )
 
 
